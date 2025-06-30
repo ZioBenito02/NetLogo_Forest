@@ -20,6 +20,17 @@ fires-own [life-in-ticks]
 breed [ sparks spark ]
 breed [ trees tree ]
 breed [ fires fire ]
+breed [bears bear]
+breed [mooses moose]
+
+to setup
+  ;; associa le forme che hai importato/incollato
+
+
+  ;; crea gli agenti in numero pari al valore dei due slider
+
+end
+
 
 ;; 2) Reporter per l’altitudine
 to-report calc-altitude [ x ]
@@ -34,8 +45,17 @@ to import-background
 end
 
 to create-forest
+  ;; ----------------------------------------------------------
+  ;; 0. reset e setup base
+  ;; ----------------------------------------------------------
   clear-all
   set spark-frequency 300
+  set-default-shape bears  "bear"
+  set-default-shape mooses "moose"
+
+  ;; ----------------------------------------------------------
+  ;; 1. terreno + alberi
+  ;; ----------------------------------------------------------
   ask patches [
     set pcolor 33
     set altitude calc-altitude pxcor
@@ -45,8 +65,66 @@ to create-forest
   ask patches with [ random-float 100 < forest-density ] [
     plant-tree pxcor pycor
   ]
+
+  ;; ----------------------------------------------------------
+  ;; 2. orsi neri – mai sovrapposti
+  ;; ----------------------------------------------------------
+  let orsi-creati 0
+  while [ orsi-creati < num-bears ] [
+    let p one-of patches with [ not any? turtles-here ]
+    ask p [ sprout-bears 1 [ set color black ] ]
+    set orsi-creati orsi-creati + 1
+  ]
+
+  ;; ----------------------------------------------------------
+  ;; 3. calcola le taglie dei branchi (2-4, niente solitari)
+  ;; ----------------------------------------------------------
+  let gruppi []
+  let remaining num-mooses
+  while [ remaining > 0 ] [
+    let g 2 + random 3              ;; 2,3,4
+    if remaining - g = 1 [ set g g + 1 ]  ;; evita resto 1
+    if g > remaining [ set g remaining ]
+    set gruppi lput g gruppi
+    set remaining remaining - g
+  ]
+
+  ;; ----------------------------------------------------------
+  ;; 4. genera i branchi, senza sovrapposizioni
+  ;; ----------------------------------------------------------
+  foreach gruppi [ bsize ->            ;; ‹bsize› NON è 'size'
+
+    ;; patch “centro-branco” libero
+    let centro one-of patches with [ not any? turtles-here ]
+
+    ask centro [
+      let r 1                ;; raggio di ricerca
+      let fatti 0            ;; cervi creati finora
+
+      while [ fatti < bsize ] [
+        ;; cerca un patch libero entro r; se pieno, allarga r
+        let sede nobody
+        while [ sede = nobody ] [
+          set sede one-of (patches in-radius r) with [ not any? turtles-here ]
+          if sede = nobody [ set r r + 1 ]
+        ]
+
+        ;; crea un cervo bianco sulla sede trovata
+        ask sede [
+          sprout-mooses 1 [ set color white ]
+        ]
+        set fatti fatti + 1
+      ]
+    ]
+  ]
+
+  ;; ----------------------------------------------------------
+  ;; 5. via!
+  ;; ----------------------------------------------------------
   reset-ticks
 end
+
+
 
 
 to-report random-tree-type
@@ -226,8 +304,8 @@ end
 GRAPHICS-WINDOW
 210
 10
-642
-443
+744
+545
 -1
 -1
 12.85
@@ -237,13 +315,13 @@ GRAPHICS-WINDOW
 1
 1
 0
+0
+0
 1
-1
-1
--16
-16
--16
-16
+-20
+20
+-20
+20
 1
 1
 1
@@ -400,7 +478,37 @@ forest-seed
 forest-seed
 0
 500
-204.0
+306.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+16
+455
+188
+488
+num-bears
+num-bears
+0
+50
+50.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+17
+507
+189
+540
+num-mooses
+num-mooses
+0
+150
+84.0
 1
 1
 NIL
@@ -457,6 +565,16 @@ arrow
 true
 0
 Polygon -7500403 true true 150 0 0 150 105 150 105 293 195 293 195 150 300 150
+
+bear
+false
+0
+Polygon -16777216 true false 195 181 180 196 165 196 166 178 151 148 151 163 136 178 61 178 45 196 30 196 16 178 16 163 1 133 16 103 46 88 106 73 166 58 225 60 240 75 240 90 240 90 255 105 241 118 226 118 211 133
+Rectangle -16777216 true false 165 195 180 225
+Rectangle -16777216 true false 30 195 45 225
+Polygon -16777216 true false 0 165 0 135 15 135 0 165
+Polygon -16777216 true false 195 225 180 210 180 225 195 225 255 240
+Polygon -16777216 true false 45 210 60 225 45 225
 
 box
 false
@@ -632,6 +750,16 @@ line half
 true
 0
 Line -7500403 true 150 0 150 150
+
+moose
+false
+3
+Polygon -6459832 true true 196 228 198 297 180 297 178 244 166 213 136 213 106 213 79 227 73 259 50 257 49 229 38 197 26 168 26 137 46 120 101 122 147 102 181 111 217 121 256 136 294 151 286 169 256 169 241 198 211 188
+Polygon -6459832 true true 74 258 87 299 63 297 49 256
+Polygon -6459832 true true 25 135 15 186 10 200 23 217 25 188 35 141
+Polygon -6459832 true true 270 150 253 100 231 94 213 100 208 135
+Polygon -6459832 true true 225 120 204 66 207 29 185 56 178 27 171 59 150 45 165 90
+Polygon -6459832 true true 225 120 249 61 241 31 265 56 272 27 280 59 300 45 285 90
 
 oak-tree
 false
