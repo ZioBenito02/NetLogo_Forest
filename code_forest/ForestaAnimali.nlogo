@@ -23,9 +23,28 @@ breed [ fires fire ]
 breed [bears bear]
 breed [mooses moose]
 
+bears-own[stato]
+  ;caratteristiche degli orsi:
+  ;stato: stato del movimento dell'orso
+  ; 0- relax status: l'orso si muove in modo randomico
+  ; 1- escape status: l'orso, una volta essersi accorto del fatto che ci sia un incendio vero e
+  ; proprio in corso, scappa
+  ; 2- fire status: l'orso ha preso fuoco e sta ora bruciando
+  ; 3- dead status: l'orso è morto
+mooses-own[stato]
+  ;caratteristiche dei cervi:
+  ;stato: stato del movimento dell'orso
+  ; 0- relax status: il cervo si muove in modo randomico
+  ; 1- alert status: il cervo si accorge di un potenziale pericolo quando percepisce un possibile
+  ; incendio ad una certa distanza, inizia a muoversi più cautamente
+  ; 2- escape status: il cervo, una volta essersi accorto del fatto che ci sia un incendio vero e
+  ; proprio in corso, scappa
+  ; 3- fire status: il cervo ha preso fuoco e sta ora bruciando
+  ; 4- dead status: il cervo è morto
 to setup
   ;; associa le forme che hai importato/incollato
-
+ set-default-shape bears "bear"
+ set-default-shape mooses "moose"
 
   ;; crea gli agenti in numero pari al valore dei due slider
 
@@ -210,6 +229,8 @@ to go
   ]
   ; burn trees
   fade-embers
+  go-bears
+  ;go-mooses
   tick
 end
 
@@ -286,6 +307,62 @@ to fade-embers
   ]
 end
 
+to go-bears
+  ask bears[
+    set shape "bear"
+    if stato = 0 [set color black]
+    if stato = 0 [
+      rt random-int-between -15 15
+      fd 0.001
+      ; controllo sul fuoco
+      let possiblefire one-of fires in-radius 10
+      if possiblefire != nobody[
+        face possiblefire
+        set stato 1
+      ]
+    ]
+    ; ;; STATO 1: Escape – corri sempre in avanti,
+    ;; e ricalcola la direzione solo se trovi un fuoco
+    if stato = 1 [
+      set color orange
+      ;; cerca il fuoco più vicino (o nobody)
+      let nf min-one-of fires [ distance myself ]
+      if nf != nobody [
+        ;; orientati nella direzione opposta
+        set heading (towards nf + 180) mod 360
+      ]
+      ;; corri sempre avanti, anche se nf = nobody
+      fd 0.01
+      let catch-distance 5
+      if nf != nobody and distance nf < catch-distance [
+        set stato 2
+      ]
+    ]
+    ;; STATO 2: On fire – l’orso è in fiamme
+    if stato = 2 [
+      ;; cambia aspetto
+      set color red
+      ;; fai sprout di un fuoco dal patch sotto l’orso
+      ask patch-here [
+        sprout-fires 1 [
+          set size 1.5
+          ;;set life-in-ticks 8
+        ]
+      ]
+      ;; dopo 5 tick, muori
+      set stato 3
+    ]
+
+    ;; STATO 3: Dead – l’orso è morto
+    if stato = 3 [
+      set shape "x"
+
+    ]
+    ]
+
+end
+
+
 to-report spark-final-cor [pcor dir]
   let wind-speed east-wind-speed
   let min-pcor min-pxcor
@@ -299,6 +376,11 @@ to-report spark-final-cor [pcor dir]
   set pcor pcor + wind-speed
   set pcor median (list min-pcor pcor max-pcor)
   report pcor
+end
+
+; Function to pick a random integer in a range
+to-report random-int-between [ min-num max-num ]
+  report random (max-num  - min-num) + min-num
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -568,13 +650,13 @@ Polygon -7500403 true true 150 0 0 150 105 150 105 293 195 293 195 150 300 150
 
 bear
 false
-0
-Polygon -16777216 true false 195 181 180 196 165 196 166 178 151 148 151 163 136 178 61 178 45 196 30 196 16 178 16 163 1 133 16 103 46 88 106 73 166 58 225 60 240 75 240 90 240 90 255 105 241 118 226 118 211 133
-Rectangle -16777216 true false 165 195 180 225
-Rectangle -16777216 true false 30 195 45 225
-Polygon -16777216 true false 0 165 0 135 15 135 0 165
-Polygon -16777216 true false 195 225 180 210 180 225 195 225 255 240
-Polygon -16777216 true false 45 210 60 225 45 225
+14
+Polygon -16777216 true true 195 181 180 196 165 196 166 178 151 148 151 163 136 178 61 178 45 196 30 196 16 178 16 163 1 133 16 103 46 88 106 73 166 58 225 60 240 75 240 90 240 90 255 105 241 118 226 118 211 133
+Rectangle -16777216 true true 165 195 180 225
+Rectangle -16777216 true true 30 195 45 225
+Polygon -16777216 true true 0 165 0 135 15 135 0 165
+Polygon -16777216 true true 195 225 180 210 180 225 195 225 255 240
+Polygon -16777216 true true 45 210 60 225 45 225
 
 box
 false
