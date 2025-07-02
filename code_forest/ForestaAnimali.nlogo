@@ -88,12 +88,10 @@ to create-forest
   ;; ----------------------------------------------------------
   ;; 2. orsi neri – mai sovrapposti
   ;; ----------------------------------------------------------
-  let orsi-creati 0
-  while [ orsi-creati < num-bears ] [
-    let p one-of patches with [ not any? turtles-here ]
-    ask p [ sprout-bears 1 [ set color black ] ]
-    set orsi-creati orsi-creati + 1
-  ]
+ask n-of num-bears patches
+        with [ abs pxcor <= 17 and abs pycor <= 17 ] [
+  sprout-bears 1 [ set color black ]
+]
 
   ;; ----------------------------------------------------------
   ;; 3. calcola le taglie dei branchi (2-4, niente solitari)
@@ -164,10 +162,10 @@ to plant-tree [x y]
     set is-burning false
     set is-burnt false
     ifelse tree-type = "pine-tree" [
-      set burning-speed 0.15
+      set burning-speed 0.06
       set spark-probability 0.15
     ] [
-      set burning-speed 0.05
+      set burning-speed 0.02
       set spark-probability 0.05
     ]
   ]
@@ -310,55 +308,140 @@ end
 to go-bears
   ask bears[
     set shape "bear"
+    if abs pxcor >= 20 or abs pycor >= 20 [
+      set hidden? true
+      set stato 99            ;; per non rieseguirne il codice
+      stop
+    ]
     if stato = 0 [set color black]
     if stato = 0 [
       rt random-int-between -15 15
-      fd 0.001
+      fd 0.005
       ; controllo sul fuoco
-      let possiblefire one-of fires in-radius 10
-      if possiblefire != nobody[
-        face possiblefire
+      if any? fires in-radius 10 [
         set stato 1
       ]
+
     ]
     ; ;; STATO 1: Escape – corri sempre in avanti,
     ;; e ricalcola la direzione solo se trovi un fuoco
     if stato = 1 [
       set color orange
-      ;; cerca il fuoco più vicino (o nobody)
-      let nf min-one-of fires [ distance myself ]
-      if nf != nobody [
-        ;; orientati nella direzione opposta
-        set heading (towards nf + 180) mod 360
+      let vxf 0
+      let vyf 0
+
+      ask trees with [is-burning] in-radius 10 [
+        let dx1 ([xcor] of myself) - xcor
+        let dy1 ([ycor] of myself) - ycor
+        let d  distance myself
+        if d > 0 [
+          set vxf vxf + dx1 / (d * d)
+          set vyf vyf + dy1 / (d * d)
+        ]
+      ]
+
+      if vxf != 0 or vyf != 0 [
+        facexy (xcor + vxf) (ycor + vyf)
       ]
       ;; corri sempre avanti, anche se nf = nobody
       fd 0.01
-      let catch-distance 5
-      if nf != nobody and distance nf < catch-distance [
+
+
+      if any? trees with [is-burning] in-radius 5 [
+        set stato 2
+      ]
+      if not any? trees with [is-burning] in-radius 12 [
+        set stato 0
+      ]
+
+    ]
+    ;; ------------- STATO 2 : orso in fiamme (rosso) -------------
+    if stato = 2 [
+      set color red
+
+      ;; ----------------------------------------------------------
+      ;; 1. direzione di fuga = somma dei vettori repulsivi
+      ;;    di tutti gli alberi in fiamme entro 15 patch
+      ;; ----------------------------------------------------------
+      let vxf 0
+      let vyf 0
+
+      ask trees with [is-burning] in-radius 10 [
+        let dx2 ([xcor] of myself) - xcor
+        let dy2 ([ycor] of myself) - ycor
+        let d  distance myself
+        if d > 0 [
+          set vxf vxf + dx2 / (d * d)
+          set vyf vyf + dy2 / (d * d)
+        ]
+      ]
+
+      if vxf != 0 or vyf != 0 [
+        facexy (xcor + vxf) (ycor + vyf)
+      ]
+
+      ;; ----------------------------------------------------------
+      ;; 2. avanza (un po’ più veloce che nello stato 1)
+      ;; ----------------------------------------------------------
+      fd 0.025
+
+      ;; ----------------------------------------------------------
+      ;; 3. cambi di stato
+      ;; ----------------------------------------------------------
+      ;; se un albero in fiamme è a ≤ 3 patch → stato 3
+      if any? trees with [is-burning] in-radius 3 [
+        set stato 3
+      ]
+
+      ;; se NON c’è alcun albero in fiamme entro 7 patch → torna a stato 1
+      if not any? trees with [is-burning] in-radius 7 [
+        set stato 1
+      ]
+    ]
+
+    ;; ------------- STATO 3 : quasi morto (violet) -------------
+    if stato = 3 [
+      set color violet
+
+      ;; 1. direzione di fuga = somma dei vettori repulsivi
+      let vxf 0
+      let vyf 0
+
+      ask trees with [is-burning] in-radius 10 [
+        let dx3 ([xcor] of myself) - xcor
+        let dy3 ([ycor] of myself) - ycor
+        let d  distance myself
+        if d > 0 [
+          set vxf vxf + dx3 / (d * d)
+          set vyf vyf + dy3 / (d * d)
+        ]
+      ]
+
+      if vxf != 0 or vyf != 0 [
+        facexy (xcor + vxf) (ycor + vyf)
+      ]
+
+      ;; 2. avanzamento
+      fd 0.03
+
+      ;; 3. cambi di stato
+      ;;    • fuoco vicinissimo (≤ 1.5) → stato 4
+      if any? trees with [is-burning] in-radius 1.5 [
+        set stato 4
+      ]
+      ;;    • nessun fuoco entro 5 → torna a stato 2
+      if not any? trees with [is-burning] in-radius 5 [
         set stato 2
       ]
     ]
-    ;; STATO 2: On fire – l’orso è in fiamme
-    if stato = 2 [
-      ;; cambia aspetto
-      set color red
-      ;; fai sprout di un fuoco dal patch sotto l’orso
-      ask patch-here [
-        sprout-fires 1 [
-          set size 1.5
-          ;;set life-in-ticks 8
-        ]
-      ]
-      ;; dopo 5 tick, muori
-      set stato 3
-    ]
 
-    ;; STATO 3: Dead – l’orso è morto
-    if stato = 3 [
+
+    ;; STATO 4: Dead – l’orso è morto
+    if stato = 4 [
       set shape "x"
 
     ]
-    ]
+  ]
 
 end
 
@@ -386,8 +469,8 @@ end
 GRAPHICS-WINDOW
 210
 10
-744
-545
+735
+536
 -1
 -1
 12.85
@@ -436,7 +519,7 @@ forest-density
 forest-density
 1
 100
-60.0
+65.0
 1
 1
 NIL
@@ -468,17 +551,17 @@ spread-probability
 spread-probability
 1
 100
-20.0
+70.0
 1
 1
 %
 HORIZONTAL
 
 SLIDER
-16
-202
-188
-235
+21
+200
+193
+233
 east-wind-speed
 east-wind-speed
 -25
@@ -498,7 +581,7 @@ north-wind-speed
 north-wind-speed
 -25
 25
-25.0
+-25.0
 1
 1
 p/t
@@ -560,7 +643,7 @@ forest-seed
 forest-seed
 0
 500
-306.0
+369.0
 1
 1
 NIL
@@ -575,7 +658,7 @@ num-bears
 num-bears
 0
 50
-50.0
+49.0
 1
 1
 NIL
