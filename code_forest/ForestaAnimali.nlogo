@@ -162,10 +162,10 @@ to plant-tree [x y]
     set is-burning false
     set is-burnt false
     ifelse tree-type = "pine-tree" [
-      set burning-speed 0.06
+      set burning-speed 0.075
       set spark-probability 0.15
     ] [
-      set burning-speed 0.02
+      set burning-speed 0.025
       set spark-probability 0.05
     ]
   ]
@@ -438,7 +438,10 @@ to go-bears
 
     ;; STATO 4: Dead – l’orso è morto
     if stato = 4 [
-      set shape "x"
+      set heading 0
+      set color grey
+      set size 1.5
+      set shape "tombstone"
 
     ]
   ]
@@ -469,8 +472,8 @@ end
 GRAPHICS-WINDOW
 210
 10
-735
-536
+744
+545
 -1
 -1
 12.85
@@ -1010,6 +1013,19 @@ Circle -16777216 true false 30 30 240
 Circle -7500403 true true 60 60 180
 Circle -16777216 true false 90 90 120
 Circle -7500403 true true 120 120 60
+
+tombstone
+true
+0
+Rectangle -7500403 true true 45 225 255 240
+Rectangle -7500403 true true 60 210 240 225
+Polygon -7500403 true true 75 210 75 210 75 90 105 60 195 60 225 90 225 210 75 210
+Rectangle -16777216 true false 375 105 405 210
+Rectangle -16777216 true false 105 105 195 135
+Rectangle -16777216 true false 135 75 165 195
+Rectangle -14835848 true false -15 255 0 270
+Rectangle -13840069 true false -90 240 -45 270
+Rectangle -10899396 true false -30 240 0 270
 
 tree
 false
