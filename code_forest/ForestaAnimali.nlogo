@@ -109,35 +109,41 @@ ask n-of num-bears patches
   ;; ----------------------------------------------------------
   ;; 4. genera i branchi, senza sovrapposizioni
   ;; ----------------------------------------------------------
-  foreach gruppi [ bsize ->            ;; ‹bsize› NON è 'size'
+ ;; ----------------------------------------------------------
+;; 4. genera i branchi, senza sovrapposizioni e solo in |x|,|y| ≤ 17
+;; ----------------------------------------------------------
+foreach gruppi [ bsize ->            ;; ‹bsize› NON è 'size'
 
-    ;; patch “centro-branco” libero
-    let centro one-of patches with [ not any? turtles-here ]
-
-    ask centro [
-      let r 1                ;; raggio di ricerca
-      let fatti 0            ;; cervi creati finora
-
-      while [ fatti < bsize ] [
-        ;; cerca un patch libero entro r; se pieno, allarga r
-        let sede nobody
-        while [ sede = nobody ] [
-          set sede one-of (patches in-radius r) with [ not any? turtles-here ]
-          if sede = nobody [ set r r + 1 ]
-        ]
-
-        ;; crea un cervo bianco sulla sede trovata
-        ask sede [
-          sprout-mooses 1 [ set color white ]
-        ]
-        set fatti fatti + 1
-      ]
-    ]
+  ;; patch “centro-branco” libero e dentro il quadrato consentito
+  let centro one-of patches with [
+    not any? turtles-here and
+    abs pxcor <= 18 and abs pycor <= 18
   ]
 
-  ;; ----------------------------------------------------------
-  ;; 5. via!
-  ;; ----------------------------------------------------------
+  ask centro [
+    let r 1                ;; raggio di ricerca iniziale
+    let fatti 0            ;; cervi creati finora
+
+    while [ fatti < bsize ] [
+      ;; cerca un patch libero entro r; se pieno, allarga r
+      let sede nobody
+      while [ sede = nobody ] [
+        set sede one-of (patches in-radius r) with [
+          not any? turtles-here and
+          abs pxcor <= 17 and abs pycor <= 17
+        ]
+        if sede = nobody [ set r r + 1 ]      ;; allarga il raggio
+      ]
+
+      ;; crea un cervo bianco sulla sede trovata
+      ask sede [
+        sprout-mooses 1 [ set color white ]
+      ]
+      set fatti fatti + 1
+    ]
+  ]
+]
+
   reset-ticks
 end
 
@@ -162,10 +168,10 @@ to plant-tree [x y]
     set is-burning false
     set is-burnt false
     ifelse tree-type = "pine-tree" [
-      set burning-speed 0.075
+      set burning-speed 0.3
       set spark-probability 0.15
     ] [
-      set burning-speed 0.025
+      set burning-speed 0.1
       set spark-probability 0.05
     ]
   ]
@@ -228,7 +234,7 @@ to go
   ; burn trees
   fade-embers
   go-bears
-  ;go-mooses
+  go-mooses
   tick
 end
 
@@ -307,18 +313,18 @@ end
 
 to go-bears
   ask bears[
-    set shape "bear"
     if abs pxcor >= 20 or abs pycor >= 20 [
       set hidden? true
       set stato 99            ;; per non rieseguirne il codice
       stop
     ]
-    if stato = 0 [set color black]
     if stato = 0 [
+      set color black
       rt random-int-between -15 15
-      fd 0.005
+      fd 0.006
       ; controllo sul fuoco
-      if any? fires in-radius 10 [
+      if any? (trees with [is-burning] in-radius 20)      ;; c’è un albero in fiamme vicino?
+   or any? (fires in-radius 20)    [
         set stato 1
       ]
 
@@ -330,7 +336,7 @@ to go-bears
       let vxf 0
       let vyf 0
 
-      ask trees with [is-burning] in-radius 10 [
+      ask trees with [is-burning] in-radius 20 [
         let dx1 ([xcor] of myself) - xcor
         let dy1 ([ycor] of myself) - ycor
         let d  distance myself
@@ -347,61 +353,63 @@ to go-bears
       fd 0.01
 
 
-      if any? trees with [is-burning] in-radius 5 [
+      if any? (trees with [is-burning] in-radius 2)      ;; c’è un albero in fiamme vicino?
+   or any? (fires in-radius 2)    [
         set stato 2
       ]
-      if not any? trees with [is-burning] in-radius 12 [
+      if not any? (trees with [is-burning] in-radius 24)      ;; c’è un albero in fiamme vicino?
+   and not any? (fires in-radius 24)    [
         set stato 0
       ]
 
     ]
     ;; ------------- STATO 2 : orso in fiamme (rosso) -------------
-    if stato = 2 [
-      set color red
+   ;; if stato = 2 [
+     ;; set color red
 
       ;; ----------------------------------------------------------
       ;; 1. direzione di fuga = somma dei vettori repulsivi
       ;;    di tutti gli alberi in fiamme entro 15 patch
       ;; ----------------------------------------------------------
-      let vxf 0
-      let vyf 0
+     ;; let vxf 0
+      ;;let vyf 0
 
-      ask trees with [is-burning] in-radius 10 [
-        let dx2 ([xcor] of myself) - xcor
-        let dy2 ([ycor] of myself) - ycor
-        let d  distance myself
-        if d > 0 [
-          set vxf vxf + dx2 / (d * d)
-          set vyf vyf + dy2 / (d * d)
-        ]
-      ]
+      ;;ask trees with [is-burning] in-radius 10 [
+        ;;let dx2 ([xcor] of myself) - xcor
+        ;;let dy2 ([ycor] of myself) - ycor
+        ;;let d  distance myself
+       ;; if d > 0 [
+       ;;   set vxf vxf + dx2 / (d * d)
+       ;;   set vyf vyf + dy2 / (d * d)
+     ;;   ]
+   ;;   ]
 
-      if vxf != 0 or vyf != 0 [
-        facexy (xcor + vxf) (ycor + vyf)
-      ]
+    ;;  if vxf != 0 or vyf != 0 [
+   ;;     facexy (xcor + vxf) (ycor + vyf)
+  ;;    ]
 
       ;; ----------------------------------------------------------
       ;; 2. avanza (un po’ più veloce che nello stato 1)
       ;; ----------------------------------------------------------
-      fd 0.025
+  ;;    fd 0.025
 
       ;; ----------------------------------------------------------
       ;; 3. cambi di stato
       ;; ----------------------------------------------------------
       ;; se un albero in fiamme è a ≤ 3 patch → stato 3
-      if any? trees with [is-burning] in-radius 3 [
-        set stato 3
-      ]
+;;      if any? trees with [is-burning] in-radius 3 [
+    ;;    set stato 3
+   ;;   ]
 
       ;; se NON c’è alcun albero in fiamme entro 7 patch → torna a stato 1
-      if not any? trees with [is-burning] in-radius 7 [
-        set stato 1
-      ]
-    ]
+  ;;    if not any? trees with [is-burning] in-radius 7 [
+   ;;     set stato 1
+   ;;   ]
+ ;;   ]
 
     ;; ------------- STATO 3 : quasi morto (violet) -------------
-    if stato = 3 [
-      set color violet
+    if stato = 2 [
+      set color red
 
       ;; 1. direzione di fuga = somma dei vettori repulsivi
       let vxf 0
@@ -422,22 +430,24 @@ to go-bears
       ]
 
       ;; 2. avanzamento
-      fd 0.03
+      fd 0.066
 
       ;; 3. cambi di stato
       ;;    • fuoco vicinissimo (≤ 1.5) → stato 4
-      if any? trees with [is-burning] in-radius 1.5 [
-        set stato 4
+      if any? (trees with [is-burning] in-radius 0.4)      ;; c’è un albero in fiamme vicino?
+   or any? (fires in-radius 0.4)    [
+        set stato 3
       ]
       ;;    • nessun fuoco entro 5 → torna a stato 2
-      if not any? trees with [is-burning] in-radius 5 [
-        set stato 2
-      ]
+      if not any? (trees with [is-burning] in-radius 6)      ;; c’è un albero in fiamme vicino?
+   and not any? (fires in-radius 10)[
+      set stato 1
+    ]
     ]
 
 
     ;; STATO 4: Dead – l’orso è morto
-    if stato = 4 [
+    if stato = 3 [
       set heading 0
       set color grey
       set size 1.5
@@ -448,6 +458,118 @@ to go-bears
 
 end
 
+to go-mooses
+  ask mooses[
+    if abs pxcor >= 20 or abs pycor >= 20 [
+      set hidden? true
+      set stato 99            ;; per non rieseguirne il codice
+      stop
+    ]
+
+    if stato = 0 [
+      set color white
+      rt random-int-between -15 15
+      fd 0.005
+      if any? (trees with [is-burning] in-radius 10)      ;; c’è un albero in fiamme vicino?
+   or any? (fires in-radius 10)    [
+        set stato 1
+      ]
+    ]
+    if stato = 1 [
+      set color sky
+      rt random-int-between -3 3
+      fd 0.005
+      if any? (trees with [is-burning] in-radius 5)      ;; c’è un albero in fiamme vicino?
+   or any? (fires in-radius 5)    [
+        set stato 2
+      ]
+      if not any? (trees with [is-burning] in-radius 15)      ;; c’è un albero in fiamme vicino?
+   and not any? (fires in-radius 22) [
+        set stato 0
+      ]
+      let vxf 0
+      let vyf 0
+
+      ask trees with [is-burning] in-radius 10 [
+        let dx3 ([xcor] of myself) - xcor
+        let dy3 ([ycor] of myself) - ycor
+        let d  distance myself
+        if d > 0 [
+          set vxf vxf + dx3 / (d * d)
+          set vyf vyf + dy3 / (d * d)
+        ]
+      ]
+
+      if vxf != 0 or vyf != 0 [
+        facexy (xcor + vxf) (ycor + vyf)
+      ]
+
+      ]
+    if stato = 2 [
+      set color cyan
+      fd 0.05
+      if any? (trees with [is-burning] in-radius 2)      ;; c’è un albero in fiamme vicino?
+   or any? (fires in-radius 2)    [
+        set stato 3
+      ]
+      if not any? (trees with [is-burning] in-radius 9)      ;; c’è un albero in fiamme vicino?
+   and not any? (fires in-radius 9) [
+        set stato 1
+      ]
+      let vxf 0
+      let vyf 0
+
+      ask trees with [is-burning] in-radius 10 [
+        let dx3 ([xcor] of myself) - xcor
+        let dy3 ([ycor] of myself) - ycor
+        let d  distance myself
+        if d > 0 [
+          set vxf vxf + dx3 / (d * d)
+          set vyf vyf + dy3 / (d * d)
+        ]
+      ]
+
+      if vxf != 0 or vyf != 0 [
+        facexy (xcor + vxf) (ycor + vyf)
+      ]
+      ]
+    if stato = 3 [
+      set color cyan
+      fd 0.1
+      if any? (trees with [is-burning] in-radius 0.4)      ;; c’è un albero in fiamme vicino?
+   or any? (fires in-radius 0.4)    [
+        set stato 4
+      ]
+      if not any? (trees with [is-burning] in-radius 6)      ;; c’è un albero in fiamme vicino?
+   and not any? (fires in-radius 6)    [
+        set stato 2
+      ]
+      let vxf 0
+      let vyf 0
+
+      ask trees with [is-burning] in-radius 10 [
+        let dx3 ([xcor] of myself) - xcor
+        let dy3 ([ycor] of myself) - ycor
+        let d  distance myself
+        if d > 0 [
+          set vxf vxf + dx3 / (d * d)
+          set vyf vyf + dy3 / (d * d)
+        ]
+      ]
+
+      if vxf != 0 or vyf != 0 [
+        facexy (xcor + vxf) (ycor + vyf)
+      ]
+      ]
+
+    if stato = 4 [
+      set heading 0
+      set color white
+      set size 1.5
+      set shape "tombstone"
+    ]
+  ]
+end
 
 to-report spark-final-cor [pcor dir]
   let wind-speed east-wind-speed
@@ -522,7 +644,7 @@ forest-density
 forest-density
 1
 100
-65.0
+91.0
 1
 1
 NIL
@@ -646,7 +768,7 @@ forest-seed
 forest-seed
 0
 500
-369.0
+366.0
 1
 1
 NIL
@@ -661,7 +783,7 @@ num-bears
 num-bears
 0
 50
-49.0
+25.0
 1
 1
 NIL
@@ -676,7 +798,7 @@ num-mooses
 num-mooses
 0
 150
-84.0
+79.0
 1
 1
 NIL
