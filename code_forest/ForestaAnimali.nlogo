@@ -31,7 +31,7 @@ bears-own[stato]
   ; proprio in corso, scappa
   ; 2- fire status: l'orso ha preso fuoco e sta ora bruciando
   ; 3- dead status: l'orso è morto
-mooses-own[stato]
+mooses-own[stato leader?]
   ;caratteristiche dei cervi:
   ;stato: stato del movimento dell'orso
   ; 0- relax status: il cervo si muove in modo randomico
@@ -137,7 +137,19 @@ foreach gruppi [ bsize ->            ;; ‹bsize› NON è 'size'
 
       ;; crea un cervo bianco sulla sede trovata
       ask sede [
-        sprout-mooses 1 [ set color white ]
+        ifelse fatti = 0 [
+          sprout-mooses 1 [
+            set stato 0
+            set leader? true
+            set color white
+          ]
+        ] [
+          sprout-mooses 1 [
+            set stato 0
+            set leader? false
+            set color white
+          ]
+        ]
       ]
       set fatti fatti + 1
     ]
@@ -459,109 +471,125 @@ to go-bears
 end
 
 to go-mooses
-  ask mooses[
+  ask mooses [
+
+    ;; escono dal mondo
     if abs pxcor >= 20 or abs pycor >= 20 [
       set hidden? true
-      set stato 99            ;; per non rieseguirne il codice
+      set stato 99
       stop
     ]
 
+    ;; STATO 0: relax
     if stato = 0 [
       set color white
       rt random-int-between -15 15
       fd 0.005
-      if any? (trees with [is-burning] in-radius 10)      ;; c’è un albero in fiamme vicino?
-   or any? (fires in-radius 10)    [
+      if any? (trees with [is-burning] in-radius 10) or any? (fires in-radius 10) [
         set stato 1
       ]
     ]
+
+    ;; STATO 1: alert
     if stato = 1 [
       set color sky
       rt random-int-between -3 3
       fd 0.005
-      if any? (trees with [is-burning] in-radius 5)      ;; c’è un albero in fiamme vicino?
-   or any? (fires in-radius 5)    [
+      if any? (trees with [is-burning] in-radius 5) or any? (fires in-radius 5) [
         set stato 2
       ]
-      if not any? (trees with [is-burning] in-radius 15)      ;; c’è un albero in fiamme vicino?
-   and not any? (fires in-radius 22) [
+      if not any? (trees with [is-burning] in-radius 15) and not any? (fires in-radius 22) [
         set stato 0
       ]
+      ;; avvicinamento/fuga cauta dagli alberi in fiamme
       let vxf 0
       let vyf 0
-
       ask trees with [is-burning] in-radius 10 [
-        let dx3 ([xcor] of myself) - xcor
-        let dy3 ([ycor] of myself) - ycor
-        let d  distance myself
-        if d > 0 [
-          set vxf vxf + dx3 / (d * d)
-          set vyf vyf + dy3 / (d * d)
+        ;; uso nomi diversi per non sovrascrivere i primitive names
+        let delta-x ([xcor] of myself) - xcor
+        let delta-y ([ycor] of myself) - ycor
+        let dist distance myself
+        if dist > 0 [
+          set vxf vxf + delta-x / (dist * dist)
+          set vyf vyf + delta-y / (dist * dist)
         ]
       ]
 
-      if vxf != 0 or vyf != 0 [
+      if (vxf != 0 or vyf != 0) [
         facexy (xcor + vxf) (ycor + vyf)
       ]
+    ]
 
-      ]
+    ;; STATO 2: escape (qui distinguo leader/follower)
     if stato = 2 [
-      set color cyan
-      fd 0.05
-      if any? (trees with [is-burning] in-radius 2)      ;; c’è un albero in fiamme vicino?
-   or any? (fires in-radius 2)    [
+      ;; branch: leader vs follower
+      ifelse leader? [
+        ;; ===== comportamento leader =====
+        set color violet
+        let vxf 0
+        let vyf 0
+        ask trees with [is-burning] in-radius 10 [
+          ;; uso nomi diversi per non sovrascrivere i primitive names
+          let delt-x ([xcor] of myself) - xcor
+          let delt-y ([ycor] of myself) - ycor
+          let distanc distance myself
+          if distanc > 0 [
+            set vxf vxf + delt-x / (distanc * distanc)
+            set vyf vyf + delt-y / (distanc * distanc)
+          ]
+        ]
+
+        if (vxf != 0 or vyf != 0) [
+          facexy (xcor + vxf) (ycor + vyf)
+        ]
+        fd 0.05
+      ] [
+        ;; ===== comportamento follower =====
+        set color cyan
+        let mio-leader min-one-of mooses with [leader?] [distance myself]
+        if mio-leader != nobody [
+          facexy [xcor] of mio-leader [ycor] of mio-leader
+          fd 0.05
+        ]
+      ]
+
+      ;; transizioni di stato da escape
+      if any? (trees with [is-burning] in-radius 2) or any? (fires in-radius 2) [
         set stato 3
       ]
-      if not any? (trees with [is-burning] in-radius 9)      ;; c’è un albero in fiamme vicino?
-   and not any? (fires in-radius 9) [
+      if not any? (trees with [is-burning] in-radius 9) and not any? (fires in-radius 9) [
         set stato 1
       ]
-      let vxf 0
-      let vyf 0
+    ]
 
-      ask trees with [is-burning] in-radius 10 [
-        let dx3 ([xcor] of myself) - xcor
-        let dy3 ([ycor] of myself) - ycor
-        let d  distance myself
-        if d > 0 [
-          set vxf vxf + dx3 / (d * d)
-          set vyf vyf + dy3 / (d * d)
-        ]
-      ]
-
-      if vxf != 0 or vyf != 0 [
-        facexy (xcor + vxf) (ycor + vyf)
-      ]
-      ]
+    ;; STATO 3: bruciato in corso
     if stato = 3 [
       set color cyan
       fd 0.1
-      if any? (trees with [is-burning] in-radius 0.4)      ;; c’è un albero in fiamme vicino?
-   or any? (fires in-radius 0.4)    [
+      if any? (trees with [is-burning] in-radius 0.4) or any? (fires in-radius 0.4) [
         set stato 4
       ]
-      if not any? (trees with [is-burning] in-radius 6)      ;; c’è un albero in fiamme vicino?
-   and not any? (fires in-radius 6)    [
+      if not any? (trees with [is-burning] in-radius 6) and not any? (fires in-radius 6) [
         set stato 2
       ]
+      ;; continua a fuggire dai focolai
       let vxf 0
       let vyf 0
-
       ask trees with [is-burning] in-radius 10 [
-        let dx3 ([xcor] of myself) - xcor
-        let dy3 ([ycor] of myself) - ycor
-        let d  distance myself
-        if d > 0 [
-          set vxf vxf + dx3 / (d * d)
-          set vyf vyf + dy3 / (d * d)
+        let dxa ([xcor] of myself) - xcor
+        let dya ([ycor] of myself) - ycor
+        let da distance myself
+        if da > 0 [
+          set vxf vxf + dx / (da * da)
+          set vyf vyf + dy / (da * da)
         ]
       ]
-
-      if vxf != 0 or vyf != 0 [
+      if (vxf != 0 or vyf != 0) [
         facexy (xcor + vxf) (ycor + vyf)
       ]
-      ]
+    ]
 
+    ;; STATO 4: morto
     if stato = 4 [
       set heading 0
       set color white
@@ -783,7 +811,7 @@ num-bears
 num-bears
 0
 50
-25.0
+32.0
 1
 1
 NIL
@@ -798,7 +826,7 @@ num-mooses
 num-mooses
 0
 150
-79.0
+150.0
 1
 1
 NIL
