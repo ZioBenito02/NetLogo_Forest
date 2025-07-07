@@ -1,10 +1,11 @@
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 1) DICHIARAZIONI GLOBALI, BREED E PROPRIETÀ
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
+;; ---------------------------------------------------------------------------
+;; 1) DICHIARAZIONI GLOBALI E DI BREED
+;; ---------------------------------------------------------------------------
 globals [
-  spark-frequency
-  iterations
+  spark-frequency              ;; tick fra due scintille dallo stesso albero
+  iterations                   ;; contatore libero per statistiche esterne
+  safe-hot-threshold           ;; < soglia → l’animale si calma
+  near-hot-threshold           ;; > soglia → tronco è considerato “warm-tree”
   next-group-id            ;; contatore per assegnare gli id-branco
   coesione-g
   distanza-coesione
@@ -12,66 +13,72 @@ globals [
 ]
 
 patches-own [
-  altitude
-  temperature
+  altitude                     ;; quota (per propagazione fuoco in salita)
+  temperature                  ;; temperatura del suolo
 ]
-
 trees-own [
-  burning-speed
-  spark-probability
-  is-burning
-  is-burnt
-  kind
-  ticks-since-spark
+  burning-speed spark-probability
+  is-burning is-burnt
+  kind ticks-since-spark
+  is-cooled ticks-since-burn
 ]
-
-sparks-own [ final-xcor final-ycor ]
-fires-own  [ life-in-ticks ]
+sparks-own [final-xcor final-ycor]
+fires-own [life-in-ticks]
+;; … altri patches-own e trees-own …
 
 breed [ sparks  spark ]
-breed [ trees   tree  ]
-breed [ fires   fire  ]
-breed [ bears   bear  ]
+breed [ trees   tree ]
+breed [ fires   fire ]
+breed [ bears   bear ]
 breed [ mooses  moose ]
 
-bears-own  [ stato ]      ;; 0-relax | 1-escape | 2-fire | 3-dead
-mooses-own [
-  stato                    ;; 0-relax | 1-alert | 2-escape | 3-fast | 4-dead
-  group-id                 ;; id del branco (tutti uguali all’interno)
-]
+bears-own [stato ticks-near-hot]   ;; 0 relax | 1 fuga | 2 fuga veloce | 3 panico | 4 morto
+;; caratteristiche degli orsi:
+;; stato:
+;;   0 - relax        : cammina random
+;;   1 - escape       : scappa da incendio percepito
+;;   2 - escape-veloce: scappa da incendio più velocemente
+;;   3 - fire/panico  : corre in preda al panico
+;;   4 - dead         : tomba
+mooses-own [stato ticks-near-hot group-id]  ;; 0 relax | 1 alert | 2 escape | 3 panico | 4 morto
+;; caratteristiche dei cervi (analoghe sopra, con stato 1 di “alert” intermedio)
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 2) REPORTER PER L’ALTITUDINE
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; ---------------------------------------------------------------------------
+;; 2) Reporter per l’altitudine (profilo lineare)
+;; ---------------------------------------------------------------------------
 to-report calc-altitude [ x ]
-  ;; profilo altimetrico d’esempio (lineare in x)
+  ;; più ci si sposta a destra, maggiore l’altitudine
   report 0.1 * x + 5
 end
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 3) PROCEDURE PRINCIPALI
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; ---------------------------------------------------------------------------
+;; 3) Procedure principali di inizializzazione del mondo
+;; ---------------------------------------------------------------------------
 to import-background
-  import-pcolors "img/terra.png"
+  import-pcolors "img/terra.png"   ;; carica PNG del terreno
 end
 
-;; ---------------------------------------------------------------------------
-;; SETUP FORESTA, ORSI, CERVI
-;; ---------------------------------------------------------------------------
 to create-forest
+  ;; ----------------------------------------------------------
+  ;; 0. reset completo & parametri di base
+  ;; ----------------------------------------------------------
   clear-all
   set spark-frequency 300
   set next-group-id 0
-
   set-default-shape bears  "bear"
   set-default-shape mooses "moose"
+  set safe-hot-threshold 20
+  set near-hot-threshold 50
   set coesione-g  0.012     ;;
   set distanza-coesione 6   ;; se > 7 patch dal centro, inizia a tirare
   set separazione-g 0.03        ;; taralo 0.01-0.03 a tuo gusto
 
-  ;; 1. terreno e alberi
+
+  ;; ----------------------------------------------------------
+  ;; 1. terreno + alberi
+  ;; ----------------------------------------------------------
   ask patches [
     set pcolor 33
     set altitude calc-altitude pxcor
@@ -82,51 +89,64 @@ to create-forest
     plant-tree pxcor pycor
   ]
 
-  ;; 2. orsi neri (mai sovrapposti, centro 34×34)
-  ask n-of num-bears patches with [ abs pxcor <= 17 and abs pycor <= 17 ] [
-    sprout-bears 1 [ set color black ]
+  ;; ----------------------------------------------------------
+  ;; 2. orsi neri – mai sovrapposti
+  ;; ----------------------------------------------------------
+  ask n-of num-bears patches
+  with [ abs pxcor <= 17 and abs pycor <= 17  and not any? turtles-here] [
+    sprout-bears 1 [
+      set color black
+      set stato 0
+      set ticks-near-hot 0
+    ]
   ]
 
-  ;; 3. calcola le taglie dei branchi (2-4, mai solitari)
+  ;; ----------------------------------------------------------
+  ;; 3. calcola taglie casuali (2-4) per i branchi di cervi
+  ;; ----------------------------------------------------------
   let gruppi []
   let remaining num-mooses
   while [ remaining > 0 ] [
-    let g 2 + random 3                 ;; 2,3,4
-    if remaining - g = 1 [ set g g + 1 ]
-    if g > remaining  [ set g remaining ]
+    let g 2 + random 3              ;; 2,3,4
+    if remaining - g = 1 [ set g g + 1 ]  ;; evita resto 1
+    if g > remaining [ set g remaining ]
     set gruppi lput g gruppi
     set remaining remaining - g
   ]
 
-  ;; 4. genera ogni branco in zona |x|,|y| ≤ 17
+  ;; ----------------------------------------------------------
+  ;; 4. genera i branchi, senza sovrapposizioni
+  ;;    (solo nell’area |x|,|y| ≤ 17)
+  ;; ----------------------------------------------------------
   foreach gruppi [ bsize ->
-    set next-group-id next-group-id + 1
+set next-group-id next-group-id + 1
     let gid next-group-id
-
+    ;; patch “centro-branco” libero
     let centro one-of patches with [
-      not any? turtles-here and
-      abs pxcor <= 18 and abs pycor <= 18
+      not any? turtles-here and abs pxcor <= 18 and abs pycor <= 18
     ]
 
     ask centro [
-      let r 1
-      let fatti 0
+      let r 1                ;; raggio di ricerca iniziale
+      let fatti 0            ;; cervi creati finora
+
       while [ fatti < bsize ] [
-        ;; trova un patch libero entro r
+        ;; patch libero entro r; se pieno, r++
         let sede nobody
         while [ sede = nobody ] [
           set sede one-of (patches in-radius r) with [
-            not any? turtles-here and
-            abs pxcor <= 17 and abs pycor <= 17
+            not any? turtles-here and abs pxcor <= 17 and abs pycor <= 17
           ]
           if sede = nobody [ set r r + 1 ]
         ]
 
+        ;; crea un cervo bianco sulla sede trovata
         ask sede [
           sprout-mooses 1 [
-            set stato 0
-            set group-id gid
             set color white
+            set group-id gid
+            set stato 0
+            set ticks-near-hot 0
           ]
         ]
         set fatti fatti + 1
@@ -137,10 +157,10 @@ to create-forest
   reset-ticks
 end
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 4) LOGICA INCENDIO (immutata)
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; ---------------------------------------------------------------------------
+;; 4) Utility: scelta casuale tipo albero (oak/pine) e rumore su coordinate
+;; ---------------------------------------------------------------------------
 to-report random-tree-type
   let tree-types ["oak-tree" "pine-tree"]
   report one-of tree-types
@@ -148,26 +168,30 @@ end
 
 to plant-tree [x y]
   let th 1
+  ;; piccola variazione sub-patch per non allineare i tronchi
   set x (random-pcor x th "x")
   set y (random-pcor y th "y")
+
   let tree-type random-tree-type
   sprout-trees 1 [
     setxy x y
     set color green
     set shape tree-type
-    set kind  tree-type
+    set kind tree-type
     set is-burning false
     set is-burnt   false
     ifelse tree-type = "pine-tree" [
-      set burning-speed    0.3
+      set burning-speed 0.3
       set spark-probability 0.15
-    ][
-      set burning-speed    0.1
+    ] [
+      set burning-speed 0.1
       set spark-probability 0.05
     ]
   ]
 end
 
+
+;; utility: jitter coordinate patch
 to-report random-pcor [pcor th dir]
   let min-pcor min-pxcor
   let max-pcor max-pxcor
@@ -180,39 +204,49 @@ to-report random-pcor [pcor th dir]
   report pcor
 end
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 5) CICLO PRINCIPALE
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; ---------------------------------------------------------------------------
+;; 5) LOOP PRINCIPALE (go)
+;; ---------------------------------------------------------------------------
 to go
-  if not any? (turtle-set trees with [is-burning] sparks) [ stop ]
+  ;; stop totale se non c’è più nulla di caldo o scintille in giro
+  if not any? (turtle-set hot-trees sparks) [ stop ]
 
-  ;; alberi in fiamme
-  ask trees with [is-burning] [
+  ;; evoluzione alberi caldi/scintille
+  ask hot-trees [
     let fire-altitude [altitude] of patch-here
+
+    ;; 1. se colore < yellow: propaga a vicini verdi
     if color < yellow [
-      ask neighbors with [ any? trees-here ] [ spread-fire fire-altitude ]
+      ask neighbors with [any? trees-here] [
+        spread-fire fire-altitude
+      ]
     ]
+
+    ;; 2. se colore < brown: prova a generare scintilla
     if color < brown [
       ifelse random-float 1 < spark-probability
-         and ticks-since-spark > spark-frequency [
+      and ticks-since-spark > spark-frequency [
+        ;; crea scintilla
         ask patch-here [
           sprout-sparks 1 [
             set shape "fire"
-            set size  0.7
+            set size 0.7
             set final-xcor (spark-final-cor pxcor "x")
             set final-ycor (spark-final-cor pycor "y")
             facexy final-xcor final-ycor
           ]
         ]
         set ticks-since-spark 0
-      ][ set ticks-since-spark ticks-since-spark + 1 ]
+      ][
+        set ticks-since-spark ticks-since-spark + 1
+      ]
     ]
   ]
 
   ;; movimento scintille
   ask sparks [
-    ifelse distancexy final-xcor final-ycor > 0.1 [
+    ifelse (distancexy final-xcor final-ycor) > 0.1 [
       fd 0.1
     ][
       ask patch-here [ ignite ]
@@ -220,47 +254,72 @@ to go
     ]
   ]
 
-  ;; “smaltisci” le turtle fire di servizio
+  ;; dissolvenza fuochi/tartarughe (decorazione)
   ask fires [
     set life-in-ticks life-in-ticks - 1
     if life-in-ticks <= 0 [ die ]
   ]
 
-  ;; aggiorna ambiente + animali
+  ;; processi lenti
   fade-embers
+  cool-burnt-trees
+
+  ;; animali
   go-bears
   go-mooses
+
   tick
 end
 
-;; ----------------------- funzioni incendio ausiliarie (immutate) ------------
 
+;; ---------------------------------------------------------------------------
+;; 6) ACCENSIONE INIZIALE – accende un albero random
+;; ---------------------------------------------------------------------------
 to start-fire
   let fire-started false
   while [not fire-started] [
     ask n-of 1 patches [ ignite ]
     if count fires > 0 [ set fire-started true ]
   ]
-  random-seed new-seed
+  random-seed new-seed         ;; reset RNG per eventi successivi
 end
 
+
+;; ---------------------------------------------------------------------------
+;; 7) PROPAGAZIONE DEL FUOCO FRA ALBERI
+;; ---------------------------------------------------------------------------
 to spread-fire [fire-altitude]
   let probability spread-probability
-  let direction   towards myself
+
+  ;; direzione relativa (0=N, 90=E, 180=S, 270=W)
+  let direction towards myself
+
+  ;; vento: modifica probabilità
   if direction = 0   [ set probability probability - north-wind-speed ]
-  if direction = 90  [ set probability probability - east-wind-speed  ]
+  if direction = 90  [ set probability probability - east-wind-speed ]
   if direction = 180 [ set probability probability + north-wind-speed ]
-  if direction = 270 [ set probability probability + east-wind-speed  ]
-  let mean-temp mean [temperature] of neighbors
+  if direction = 270 [ set probability probability + east-wind-speed ]
+
+  ;; temperatura media vicini: log²
+  let mean-temp (mean [temperature] of neighbors)
   set probability probability + (ln (mean-temp + 1)) ^ 2
+
+  ;; clamp 0-100
   set probability median (list 0 probability 100)
+
+  ;; salita favorisce fiamme
   let altitude-diff fire-altitude - altitude
   if altitude-diff > 0 [
     set probability probability * (1 + abs (tan inclination / 3))
   ]
+
   if random 100 < probability [ ignite ]
 end
 
+
+;; ---------------------------------------------------------------------------
+;; 8) IGNIZIONE DI UN PATCH (spawna una “fire” tartaruga)
+;; ---------------------------------------------------------------------------
 to ignite
   sprout-fires 1 [
     set shape "fire"
@@ -268,160 +327,108 @@ to ignite
     let green-trees trees-here with [not (is-burning or is-burnt)]
     ifelse any? green-trees [
       set life-in-ticks 10
-    ] [ die ]
-    ask green-trees [
-      set is-burning true
+    ] [
+      die                     ;; fuoco a vuoto
     ]
+    ask green-trees [ set is-burning true ]
   ]
 end
 
+
+;; ---------------------------------------------------------------------------
+;; 9) EVOLUZIONE COLORE + CALORE ALBERI IN FIAMME
+;; ---------------------------------------------------------------------------
 to fade-embers
   ask trees with [is-burning] [
     set color color - burning-speed
     ask patch-here [ set temperature temperature + 1 ]
     ask neighbors  [ set temperature temperature + 0.25 ]
+
+    ;; passaggio in fiamme → bruciato caldo
     if color < red - 3.5 [
       ask patch-here [ set pcolor 2 ]
       set is-burning false
       set is-burnt   true
+      set is-cooled  false
+      set ticks-since-burn 0
       set shape "charred-ground"
-    ]
-  ]
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 6) COMPORTAMENTO ORSI
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to go-bears
-  ask bears [
-    ;; uscita dal mondo
-    if abs pxcor >= 20 or abs pycor >= 20 [
-      set hidden? true
-      set stato 99
-      stop
-    ]
-
-    ;; ---------- STATO 0: relax ---------------------------------------------
-    if stato = 0 [
-      set color black
-      rt random-int-between -15 15
-      fd 0.006
-      if any? (trees with [is-burning] in-radius 20) or any? (fires in-radius 20) [
-        set stato 1
-      ]
-    ]
-
-    ;; ---------- STATO 1: escape lento --------------------------------------
-    if stato = 1 [
-      set color orange
-      let vxf 0
-      let vyf 0
-      ask trees with [is-burning] in-radius 20 [
-        let deltax ([xcor] of myself) - xcor
-        let deltay ([ycor] of myself) - ycor
-        let d distance myself
-        if d > 0 [
-          set vxf vxf + deltax / (d * d)
-          set vyf vyf + deltay / (d * d)
-        ]
-      ]
-
-      if vxf != 0 or vyf != 0 [ facexy (xcor + vxf) (ycor + vyf) ]
-      fd 0.01
-      if any? (trees with [is-burning] in-radius 2) or any? (fires in-radius 2) [
-        set stato 2
-      ]
-      if not any? (trees with [is-burning] in-radius 24) and
-         not any? (fires in-radius 24) [
-        set stato 0
-      ]
-    ]
-
-    ;; ---------- STATO 2: orso in fiamme (rosso) ----------------------------
-    if stato = 2 [
       set color red
-      let vxf 0
-      let vyf 0
-      ask trees with [is-burning] in-radius 10 [
-        let dxa ([xcor] of myself) - xcor
-        let dya ([ycor] of myself) - ycor
-        let d  distance myself
-        if d > 0 [
-          set vxf vxf + dxa / (d * d)
-          set vyf vyf + dya / (d * d)
-        ]
-      ]
-      if vxf != 0 or vyf != 0 [ facexy (xcor + vxf) (ycor + vyf) ]
-      fd 0.066
-      if any? (trees with [is-burning] in-radius 0.4) or any? (fires in-radius 0.4) [
-        set stato 3
-      ]
-      if not any? (trees with [is-burning] in-radius 6) and
-         not any? (fires in-radius 10) [
-        set stato 1
-      ]
-    ]
-
-    ;; ---------- STATO 3: morto --------------------------------------------
-    if stato = 3 [
-      set heading 0
-      set color grey
-      set size 1.5
-      set shape "tombstone"
     ]
   ]
 end
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 7) COMPORTAMENTO CERVI (senza leader)
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-to go-mooses
-
-
-  ;; ----------------------------------------------------------
-  ;; 1. dinamica individuale
-  ;; ----------------------------------------------------------
-  ask mooses [
-    ;; uscita dal mondo
-    if abs pxcor >= 20 or abs pycor >= 20 [
-      set hidden? true
-      set stato 99
-      stop
+;; ---------------------------------------------------------------------------
+;; 10) RAFFREDDAMENTO TRONCHI (dopo 300 tick diventano “freddi”)
+;; ---------------------------------------------------------------------------
+to cool-burnt-trees
+  ask trees with [is-burnt] [
+    set ticks-since-burn ticks-since-burn + 1
+    if ticks-since-burn >= 300 [
+      set is-cooled true
+      ask patch-here [ set temperature initial-temperature ]
+      set color blue
     ]
+  ]
+end
 
-    ;; -------- STATO 0: relax ---------------------------------------------
-    if stato = 0 [
-      set color white
-      rt random-int-between -15 15
-      fd 0.005
-      if any? (trees with [is-burning] in-radius 10) or any? (fires in-radius 10) [
-        set stato 1
-      ]
-    ]
 
-    ;; -------- STATO 1: alert ---------------------------------------------
-    ;; -------- STATO 1: alert ---------------------------------
-if stato = 1 [
-  set color 105
-  set distanza-coesione 5
-  rt random-int-between -3 3
-  fd 0.005
+;; ---------------------------------------------------------------------------
+;; 11) REPORTER STATO ALBERI
+;; ---------------------------------------------------------------------------
+to-report hot-trees
+  ;; alberi ancora pericolosi: in fiamme **oppure** bruciati ma caldi
+  report trees with [ is-burning or (is-burnt and not is-cooled) ]
+end
 
-  ;; repulsione dal fuoco
+to-report burning-trees
+  report trees with [ is-burning ]
+end
+
+to-report warm-trees
+  ;; tronco bruciato da > near-hot-threshold tick
+  report trees with [
+    is-burnt and not is-cooled and ticks-since-burn > near-hot-threshold
+  ]
+end
+
+to-report burning-and-warm-trees
+  report (turtle-set burning-trees warm-trees)
+end
+
+
+;; ---------------------------------------------------------------------------
+;; 12) FUNZIONE DI FUGA (animali) – vettore somma dei repulsori
+;; ---------------------------------------------------------------------------
+to escape-bears
   let vxf 0
   let vyf 0
-  ask trees with [is-burning] in-radius 10 [
-    let dxf ([xcor] of myself) - xcor
-    let dyf ([ycor] of myself) - ycor
-    let d distance myself
+  ask burning-and-warm-trees in-radius 10 [
+    let dx3 ([xcor] of myself) - xcor
+    let dy3 ([ycor] of myself) - ycor
+    let d  distance myself
     if d > 0 [
-      set vxf vxf + dxf / (d * d)
-      set vyf vyf + dyf / (d * d)
+      set vxf vxf + dx3 / (d * d)
+      set vyf vyf + dy3 / (d * d)
     ]
   ]
+  if vxf != 0 or vyf != 0 [
+    facexy (xcor + vxf) (ycor + vyf)
+  ]
+end
 
+to escape-mooses
+  let vxf 0
+  let vyf 0
+  ask burning-and-warm-trees in-radius 10 [
+    let dx3 ([xcor] of myself) - xcor
+    let dy3 ([ycor] of myself) - ycor
+    let d  distance myself
+    if d > 0 [
+      set vxf vxf + dx3 / (d * d)
+      set vyf vyf + dy3 / (d * d)
+    ]
+  ]
   ;; coesione verso il baricentro del branco
   let centro centro-branco group-id
   let dist-centro distancexy (item 0 centro) (item 1 centro)
@@ -448,212 +455,255 @@ if stato = 1 [
           set vyf vyf + separazione-g * cy-sep
         ]
       ]
-
   if vxf != 0 or vyf != 0 [
     facexy (xcor + vxf) (ycor + vyf)
   ]
-
-  ;; transizioni di stato (come avevi già)
-  if any? (trees with [is-burning] in-radius 5) or any? (fires in-radius 5) [
-    set stato 2
-  ]
-  if not any? (trees with [is-burning] in-radius 15) and
-     not any? (fires in-radius 22) [
-    set stato 0
-  ]
-]
+end
 
 
-    ;; -------- STATO 2: fuga “normale” (tutti uguali) ----------------------
-    ;; -------- STATO 2: fuga “normale” ---------------------------------
-if stato = 2 [
-  set color violet
-  set distanza-coesione 6        ;; gruppo un po’ più lasco
-  ;; -----------------------------------------------------------
-  ;; 1. vettore repulsione dalle fiamme
-  ;; -----------------------------------------------------------
-  let vxf 0
-  let vyf 0
-  ask trees with [is-burning] in-radius 10 [
-    let dxr ([xcor] of myself) - xcor
-    let dyr ([ycor] of myself) - ycor
-    let d distance myself
-    if d > 0 [
-      set vxf vxf + dxr / (d * d)
-      set vyf vyf + dyr / (d * d)
+;; ---------------------------------------------------------------------------
+;; 13) LOGICA ORSI – 5 STATI
+;; ---------------------------------------------------------------------------
+to go-bears
+  ask bears [
+
+    ;; 0. esci dal mondo
+    if abs pxcor >= 20 or abs pycor >= 20 [
+      set hidden? true
+      set stato 99
+      stop
+    ]
+    ;; tocca fuoco vivo → stato 3 (bruciato)
+    if any? (burning-trees in-radius 0.4) or any? (fires in-radius 0.4) [
+      set stato 3
+    ]
+
+    ;; contatore calore
+    let near-hot? any? hot-trees in-radius 1
+    ifelse near-hot? [
+      set ticks-near-hot ticks-near-hot + 1
+    ][
+      set ticks-near-hot max list 0 (ticks-near-hot - 1)
+    ]
+    if ticks-near-hot >= 150 [
+      set stato 3    ;; morte per calore prolungato
+    ]
+
+    ;; stato 0 – relax
+    if stato = 0 [
+      set color black
+      rt random-int-between -15 15
+      fd 0.006
+      if any? (burning-trees in-radius 20) or any? (fires in-radius 20)
+         or any? (warm-trees in-radius 4) [
+        set stato 1
+      ]
+    ]
+
+    ;; stato 1 – fuga cauta
+    if stato = 1 [
+      set color orange
+      escape-bears
+      fd 0.01
+      if any? (burning-trees in-radius 4) or any? (fires in-radius 4)
+         or any? (warm-trees in-radius 2) [
+        set stato 2
+      ]
+      if not any? (burning-trees in-radius 24)
+         and not any? (fires in-radius 24)
+         and not any? (warm-trees in-radius 10)
+         and ticks-near-hot < safe-hot-threshold [
+        set stato 0
+      ]
+    ]
+
+    ;; stato 2 – panico medio
+    if stato = 2 [
+      set color red
+      escape-bears
+      fd 0.03
+      if any? (burning-trees in-radius 2) or any? (fires in-radius 2)
+         or any? (warm-trees in-radius 1) [
+        set stato 3
+      ]
+      if not any? (burning-trees in-radius 7)
+         and not any? (fires in-radius 7)
+         and not any? (warm-trees in-radius 3)
+         and ticks-near-hot < safe-hot-threshold [
+        set stato 1
+      ]
+    ]
+
+    ;; stato 3 – panico estremo / brucia
+    if stato = 3 [
+      set color violet
+      escape-bears
+      fd 0.066
+      if any? (burning-trees in-radius 0.4) or any? (fires in-radius 0.4) [
+        set stato 4
+      ]
+      if not any? (burning-trees in-radius 4)
+         and not any? (fires in-radius 4)
+         and not any? (warm-trees in-radius 2)
+         and ticks-near-hot < safe-hot-threshold [
+        set stato 2
+      ]
+    ]
+
+    ;; lampeggio giallo se vicino al caldo
+    let base-color color
+    if near-hot? and stato < 3 [
+      ifelse ticks mod 8 < 4 [ set color yellow ] [ set color base-color ]
+    ]
+
+    ;; stato 4 – morto (tomba)
+    if stato = 4 [
+      set heading 0
+      set color grey
+      set size 1.5
+      set shape "tombstone"
+      stop
     ]
   ]
-
-  ;; -----------------------------------------------------------
-  ;; 2. coesione verso il centro del branco
-  ;; -----------------------------------------------------------
-  let centro centro-branco group-id
-  let dist-centro distancexy (item 0 centro) (item 1 centro)
-  if dist-centro > distanza-coesione [
-    let cx (item 0 centro - xcor)
-    let cy (item 1 centro - ycor)
-    set vxf vxf + coesione-g * cx
-    set vyf vyf + coesione-g * cy
-  ]
-      ;; --- separazione minima: evita sovrapposizioni fra compagni ------------
-      let vicini mooses with [
-        group-id = [group-id] of myself
-        and self != myself
-        and distance myself < 2          ;; troppo vicini
-      ]
-      if any? vicini [
-        let mx mean [xcor] of vicini
-        let my mean [ycor] of vicini
-        let dsep distancexy mx my
-        if dsep > 0 [
-          let cx-sep (xcor - mx) / dsep      ;; direzione di fuga normalizzata
-          let cy-sep (ycor - my) / dsep
-          set vxf vxf + separazione-g * cx-sep
-          set vyf vyf + separazione-g * cy-sep
-        ]
-      ]
-
-  ;; -----------------------------------------------------------
-  ;; 3. muovi e orienta
-  ;; -----------------------------------------------------------
-  if vxf != 0 or vyf != 0 [
-    facexy (xcor + vxf) (ycor + vyf)
-  ]
-  fd 0.05
-
-  ;; -----------------------------------------------------------
-  ;; 4. transizioni di stato
-  ;; -----------------------------------------------------------
-  if any? (trees with [is-burning] in-radius 2) or any? (fires in-radius 2) [
-    set stato 3
-  ]
-  if not any? (trees with [is-burning] in-radius 9) and
-     not any? (fires in-radius 9) [
-    set stato 1
-  ]
-]
+end
 
 
-    ;; -------- STATO 3: fuga veloce ---------------------------------------
-    ;; -------- STATO 3: fuga veloce ------------------------------------
-if stato = 3 [
-  set color blue
-  set distanza-coesione 7        ;; permetti un po’ più di dispersione
-  ;; -----------------------------------------------------------
-  ;; 1. vettore repulsione dalle fiamme
-  ;; -----------------------------------------------------------
-  let vxf 0
-  let vyf 0
-  ask trees with [is-burning] in-radius 10 [
-    let dxf ([xcor] of myself) - xcor
-    let dyf ([ycor] of myself) - ycor
-    let d distance myself
-    if d > 0 [
-      set vxf vxf + dxf / (d * d)
-      set vyf vyf + dyf / (d * d)
+
+;; ---------------------------------------------------------------------------
+;; 14) LOGICA CERVI – 5 STATI
+;; ---------------------------------------------------------------------------
+to go-mooses
+  ask mooses [
+
+    ;; bordi
+    if abs pxcor >= 20 or abs pycor >= 20 [
+      set hidden? true
+      set stato 99
+      stop
     ]
-  ]
 
-  ;; -----------------------------------------------------------
-  ;; 2. coesione verso il centro del branco
-  ;; -----------------------------------------------------------
-  let centro centro-branco group-id
-  let dist-centro distancexy (item 0 centro) (item 1 centro)
-  if dist-centro > distanza-coesione [
-    let cx (item 0 centro - xcor)
-    let cy (item 1 centro - ycor)
-    set vxf vxf + coesione-g * cx
-    set vyf vyf + coesione-g * cy
-  ]
-      ;; --- separazione minima: evita sovrapposizioni fra compagni ------------
-      let vicini mooses with [
-        group-id = [group-id] of myself
-        and self != myself
-        and distance myself < 2          ;; troppo vicini
+    ;; contatore calore
+    let near-hot? any? hot-trees in-radius 1
+    ifelse near-hot? [
+      set ticks-near-hot ticks-near-hot + 1
+    ][
+      set ticks-near-hot max list 0 (ticks-near-hot - 1)
+    ]
+    if ticks-near-hot >= 150 [
+      set stato 4
+    ]
+
+    ;; stato 0 – relax
+    if stato = 0 [
+      set color white
+      rt random-int-between -15 15
+      fd 0.005
+      if any? (burning-trees in-radius 10) or any? (fires in-radius 10)
+         or any? (warm-trees in-radius 3) [
+        set stato 1
       ]
-      if any? vicini [
-        let mx mean [xcor] of vicini
-        let my mean [ycor] of vicini
-        let dsep distancexy mx my
-        if dsep > 0 [
-          let cx-sep (xcor - mx) / dsep      ;; direzione di fuga normalizzata
-          let cy-sep (ycor - my) / dsep
-          set vxf vxf + separazione-g * cx-sep
-          set vyf vyf + separazione-g * cy-sep
-        ]
+    ]
+
+    ;; stato 1 – alert
+    if stato = 1 [
+      set color cyan
+      set distanza-coesione 5
+      rt random-int-between -3 3
+      fd 0.005
+
+
+
+      if any? (burning-trees in-radius 5) or any? (fires in-radius 5)
+         or any? (warm-trees in-radius 1) [
+        set stato 2
       ]
+      if not any? (burning-trees with [is-burning] in-radius 15)
+         and not any? (fires in-radius 15)
+         and not any? (warm-trees in-radius 7)
+         and ticks-near-hot < safe-hot-threshold [
+        set stato 0
+      ]
+      escape-mooses
+    ]
 
-  ;; -----------------------------------------------------------
-  ;; 3. muovi e orienta
-  ;; -----------------------------------------------------------
-  if vxf != 0 or vyf != 0 [
-    facexy (xcor + vxf) (ycor + vyf)
-  ]
-  fd 0.1
+    ;; stato 2 – fuga
+    if stato = 2 [
+      set color sky
+      set distanza-coesione 6
+      fd 0.05
+      if any? (burning-trees in-radius 2) or any? (fires in-radius 2)
+         or any? (warm-trees in-radius 0.5) [
+        set stato 3
+      ]
+      if not any? (burning-trees in-radius 9)
+         and not any? (fires in-radius 9)
+         and not any? (warm-trees in-radius 4)
+         and ticks-near-hot < safe-hot-threshold [
+        set stato 1
+      ]
+      escape-mooses
+    ]
 
-  ;; -----------------------------------------------------------
-  ;; 4. transizioni di stato
-  ;; -----------------------------------------------------------
-  if any? (trees with [is-burning] in-radius 0.4) or any? (fires in-radius 0.4) [
-    set stato 4                      ;; morto/bruciato
-  ]
-  if not any? (trees with [is-burning] in-radius 6) and
-     not any? (fires in-radius 6) [
-    set stato 2
-  ]
-]
+    ;; stato 3 – panico
+    if stato = 3 [
+      set color blue
+      set distanza-coesione 7
+      fd 0.1
+      if any? (burning-trees in-radius 0.4) or any? (fires in-radius 0.4) [
+        set stato 4
+      ]
+      if not any? (burning-trees in-radius 6)
+         and not any? (fires in-radius 6)
+         and not any? (warm-trees in-radius 3)
+         and ticks-near-hot < safe-hot-threshold [
+        set stato 2
+      ]
+      escape-mooses
+    ]
 
-
-    ;; -------- STATO 4: morto --------------------------------------------
+    ;; stato 4 – morto
     if stato = 4 [
       set heading 0
       set color white
       set size 1.5
       set shape "tombstone"
+      stop
+    ]
+
+    ;; lampeggio giallo caldo
+    let base-color color
+    if near-hot? and stato < 4 [
+      ifelse ticks mod 8 < 4 [ set color yellow ] [ set color base-color ]
     ]
   ]
-
-  ;; ----------------------------------------------------------
-  ;; SINCRONIZZA SOLO AL RIALZO (mai al ribasso)
-  ;; ----------------------------------------------------------
-  let gids remove-duplicates [ group-id ] of mooses with [ stato < 4 ]
-
-  foreach gids [ gid ->
-    let s-max max [ stato ] of mooses
-    with [ group-id = gid  ;; stesso branco
-      and stato < 4 ] ;; esclude i morti
-
-    ;; promuovi solo chi è sotto il massimo
-    ask mooses with [ group-id = gid
-      and stato < s-max ] [
-      set stato s-max
-    ]
-  ]
-
-
 end
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 8) UTILITÀ
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; ---------------------------------------------------------------------------
+;; 15) CALCOLO DESTINAZIONE SCINTILLA IN BASE AL VENTO
+;; ---------------------------------------------------------------------------
 to-report spark-final-cor [pcor dir]
   let wind-speed east-wind-speed
   let min-pcor   min-pxcor
   let max-pcor   max-pxcor
   if dir = "y" [
     set wind-speed north-wind-speed
-    set min-pcor   min-pycor
-    set max-pcor   max-pycor
+    set min-pcor min-pycor
+    set max-pcor max-pycor
   ]
-  set wind-speed round (wind-speed / 2)
+  set wind-speed (round wind-speed / 2)   ;; metà forza per “passo” scintilla
   set pcor pcor + wind-speed
-  set pcor median (list min-pcor pcor max-pcor)
+  set pcor median (list min-pcor pcor max-pcor)   ;; clamp bordi mondo
   report pcor
 end
 
-to-report random-int-between [min-num max-num]
-  report random (max-num - min-num) + min-num
+
+;; ---------------------------------------------------------------------------
+;; 16) UTILITY – intero casuale in range
+;; ---------------------------------------------------------------------------
+; Function to pick a random integer in a range
+to-report random-int-between [ min-num max-num ]
+  report random (max-num  - min-num) + min-num
 end
 
 ;; ----------------------------------------------------------
@@ -689,7 +739,6 @@ end
 to-report cervi-morti
   report count mooses with [ stato = 4 ]
 end
-
 @#$#@#$#@
 GRAPHICS-WINDOW
 210
@@ -744,7 +793,7 @@ forest-density
 forest-density
 1
 100
-91.0
+75.0
 1
 1
 NIL
@@ -868,7 +917,7 @@ forest-seed
 forest-seed
 0
 500
-366.0
+156.0
 1
 1
 NIL
@@ -883,7 +932,7 @@ num-bears
 num-bears
 0
 50
-32.0
+34.0
 1
 1
 NIL
@@ -898,33 +947,11 @@ num-mooses
 num-mooses
 0
 150
-150.0
+112.0
 1
 1
 NIL
 HORIZONTAL
-
-MONITOR
-765
-15
-831
-60
-NIL
-orsi-morti
-2
-1
-11
-
-MONITOR
-764
-74
-838
-119
-NIL
-cervi-morti
-2
-1
-11
 
 @#$#@#$#@
 ## WHAT IS IT?
@@ -1031,19 +1058,19 @@ Circle -7500403 true true 195 195 58
 
 charred-ground
 false
-0
-Polygon -2674135 true false 0 240 45 195 75 180 90 165 90 135 45 120 0 135
-Polygon -2674135 true false 300 240 285 210 270 180 270 150 300 135 300 225
+1
+Polygon -2674135 true true 0 240 45 195 75 180 90 165 90 135 45 120 0 135
+Polygon -2674135 true true 300 240 285 210 270 180 270 150 300 135 300 225
 Polygon -6459832 true false 225 300 240 270 270 255 285 255 300 285 300 300
 Polygon -6459832 true false 0 285 30 300 0 300
-Polygon -2674135 true false 225 0 210 15 210 30 255 60 285 45 300 30 300 0
-Polygon -2674135 true false 0 30 30 0 0 0
+Polygon -2674135 true true 225 0 210 15 210 30 255 60 285 45 300 30 300 0
+Polygon -2674135 true true 0 30 30 0 0 0
 Polygon -6459832 true false 15 30 75 0 180 0 195 30 225 60 210 90 135 60 45 60
 Polygon -6459832 true false 0 105 30 105 75 120 105 105 90 75 45 75 0 60
 Polygon -6459832 true false 300 60 240 75 255 105 285 120 300 105
-Polygon -2674135 true false 120 75 120 105 105 135 105 165 165 150 240 150 255 135 240 105 210 105 180 90 150 75
+Polygon -2674135 true true 120 75 120 105 105 135 105 165 165 150 240 150 255 135 240 105 210 105 180 90 150 75
 Polygon -6459832 true false 75 300 135 285 195 300
-Polygon -2674135 true false 30 285 75 285 120 270 150 270 150 210 90 195 60 210 15 255
+Polygon -2674135 true true 30 285 75 285 120 270 150 270 150 210 90 195 60 210 15 255
 Polygon -6459832 true false 180 285 240 255 255 225 255 195 240 165 195 165 150 165 135 195 165 210 165 255
 
 circle
@@ -1258,7 +1285,7 @@ Circle -7500403 true true 60 60 180
 Circle -16777216 true false 90 90 120
 Circle -7500403 true true 120 120 60
 
-tombston
+tombstone
 true
 0
 Rectangle -7500403 true true 45 225 255 240
@@ -1270,15 +1297,6 @@ Rectangle -16777216 true false 135 75 165 195
 Rectangle -14835848 true false -15 255 0 270
 Rectangle -13840069 true false -90 240 -45 270
 Rectangle -10899396 true false -30 240 0 270
-
-tombstone
-true
-0
-Rectangle -7500403 true true 45 225 255 240
-Rectangle -7500403 true true 60 210 240 225
-Polygon -7500403 true true 75 210 75 90 105 60 195 60 225 90 225 210 75 210 75 210
-Rectangle -16777216 true false 135 75 165 195
-Rectangle -16777216 true false 105 105 195 135
 
 tree
 false
