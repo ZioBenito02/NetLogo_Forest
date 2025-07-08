@@ -33,15 +33,15 @@ breed [ bears   bear ]
 breed [ mooses  moose ]
 
 bears-own [stato ticks-near-hot]   ;; 0 relax | 1 fuga | 2 fuga veloce | 3 panico | 4 morto
-;; caratteristiche degli orsi:
-;; stato:
-;;   0 - relax        : cammina random
-;;   1 - escape       : scappa da incendio percepito
-;;   2 - escape-veloce: scappa da incendio più velocemente
-;;   3 - fire/panico  : corre in preda al panico
-;;   4 - dead         : tomba
-mooses-own [stato ticks-near-hot group-id]  ;; 0 relax | 1 alert | 2 escape | 3 panico | 4 morto
-;; caratteristiche dei cervi (analoghe sopra, con stato 1 di “alert” intermedio)
+                                   ;; caratteristiche degli orsi:
+                                   ;; stato:
+                                   ;;   0 - relax        : cammina random
+                                   ;;   1 - escape       : scappa da incendio percepito
+                                   ;;   2 - escape-veloce: scappa da incendio più velocemente
+                                   ;;   3 - fire/panico  : corre in preda al panico
+                                   ;;   4 - dead         : tomba
+mooses-own [stato ticks-near-hot group-id is-leader?]  ;; 0 relax | 1 alert | 2 escape | 3 panico | 4 morto
+                                                       ;; caratteristiche dei cervi (analoghe sopra, con stato 1 di “alert” intermedio)
 
 
 ;; ---------------------------------------------------------------------------
@@ -72,8 +72,8 @@ to create-forest
   set safe-hot-threshold 20
   set near-hot-threshold 50
   set coesione-g  0.012     ;;
-  set distanza-coesione 6   ;; se > 7 patch dal centro, inizia a tirare
-  set separazione-g 0.03        ;; taralo 0.01-0.03 a tuo gusto
+  set distanza-coesione 4   ;; se > 5 patch dal centro, inizia a tirare
+  set separazione-g 0.02        ;; taralo 0.01-0.03 a tuo gusto
 
 
   ;; ----------------------------------------------------------
@@ -119,7 +119,7 @@ to create-forest
   ;;    (solo nell’area |x|,|y| ≤ 17)
   ;; ----------------------------------------------------------
   foreach gruppi [ bsize ->
-set next-group-id next-group-id + 1
+    set next-group-id next-group-id + 1
     let gid next-group-id
     ;; patch “centro-branco” libero
     let centro one-of patches with [
@@ -147,6 +147,7 @@ set next-group-id next-group-id + 1
             set group-id gid
             set stato 0
             set ticks-near-hot 0
+            set is-leader? false
           ]
         ]
         set fatti fatti + 1
@@ -364,7 +365,7 @@ end
 to cool-burnt-trees
   ask trees with [is-burnt] [
     set ticks-since-burn ticks-since-burn + 1
-    if ticks-since-burn >= 300 [
+    if ticks-since-burn >= 200 [
       set is-cooled true
       ask patch-here [ set temperature initial-temperature ]
       set color blue
@@ -438,27 +439,150 @@ to escape-mooses
     set vxf vxf + coesione-g * cx
     set vyf vyf + coesione-g * cy
   ]
-      ;; --- separazione minima: evita sovrapposizioni fra compagni ------------
-      let vicini mooses with [
-        group-id = [group-id] of myself
-        and self != myself
-        and distance myself < 2          ;; troppo vicini
-      ]
-      if any? vicini [
-        let mx mean [xcor] of vicini
-        let my mean [ycor] of vicini
-        let dsep distancexy mx my
-        if dsep > 0 [
-          let cx-sep (xcor - mx) / dsep      ;; direzione di fuga normalizzata
-          let cy-sep (ycor - my) / dsep
-          set vxf vxf + separazione-g * cx-sep
-          set vyf vyf + separazione-g * cy-sep
-        ]
-      ]
+  ;; --- separazione minima: evita sovrapposizioni fra compagni ------------
+  let vicini mooses with [
+    group-id = [group-id] of myself
+    and self != myself
+    and distance myself < 2          ;; troppo vicini
+  ]
+  if any? vicini [
+    let mx mean [xcor] of vicini
+    let my mean [ycor] of vicini
+    let dsep distancexy mx my
+    if dsep > 0 [
+      let cx-sep (xcor - mx) / dsep      ;; direzione di fuga normalizzata
+      let cy-sep (ycor - my) / dsep
+      set vxf vxf + separazione-g * cx-sep
+      set vyf vyf + separazione-g * cy-sep
+    ]
+  ]
   if vxf != 0 or vyf != 0 [
     facexy (xcor + vxf) (ycor + vyf)
   ]
 end
+
+;; distanza dal fuoco (0 = su un albero in fiamme)
+to-report fire-distance
+  ifelse any? burning-and-warm-trees
+  [ report min [distance myself] of burning-and-warm-trees ]
+  [ report 1e6 ]               ;; nessun pericolo visibile
+end
+;; elegge/rinnova il leader solo se necessario
+to update-moose-leaders
+  let soglia 2                      ;; distanza minima (in patch) per scalzare il leader
+
+  foreach remove-duplicates [group-id] of mooses [
+    gid ->
+
+    ;; membri vivi del branco
+    let membri mooses with [group-id = gid and stato < 4 and stato > 0]
+    if not any? membri [ stop ]
+
+    ;; attuale leader (se ancora vivo)
+    let attuale one-of membri with [is-leader?]
+
+    ;; candidato più vicino al fuoco
+    let candidato min-one-of membri [ fire-distance ]
+
+    ;; se non c’è leader (p.es. è morto) eleggi subito il candidato
+    if attuale = nobody [
+      ask candidato [ set is-leader? true ]
+      stop
+    ]
+
+    ;; differenza di vicinanza al fuoco
+    let diff ([fire-distance] of attuale) - ([fire-distance] of candidato)
+
+    ;; cambia leader solo se il candidato è > soglia più vicino
+    if diff > soglia [
+      ask attuale   [ set is-leader? false ]
+      ask candidato [ set is-leader? true  ]
+    ]
+  ]
+end
+
+;; ----------------------------------------------------------
+;; Sincronizza gli stati all'interno di ogni branco di cervi
+;; ----------------------------------------------------------
+to sync-moose-group-states
+  ;; per ogni id-branco ancora vivo
+  foreach remove-duplicates [group-id] of mooses [
+    gid ->
+    let vivi mooses with [group-id = gid and stato < 4]   ;; esclude i morti
+    if any? vivi [
+      ;; stato più critico (0 relax, 1 alert, 2 escape, 3 panico)
+      let max-s max [stato] of vivi
+      ;; alza tutti al livello max-s (non si retrocede mai nello stesso tick)
+      ask vivi with [stato < max-s] [
+        set stato max-s
+      ]
+    ]
+  ]
+end
+
+;; ---------------------------------------------------------------------------
+;; Follower: sta a 0.5 patch da leader e compagni (con banda ±0.05)
+;; ---------------------------------------------------------------------------
+to update-moose-not-leader [step]
+  if is-leader? [ stop ]
+
+  let target-d 1     ;; distanza ideale
+  let toll     0.05    ;; fascia di quiete
+
+  ;; ---------------- vettore verso il leader --------------------------------
+  let capo one-of mooses with [
+    is-leader? and group-id = [group-id] of myself
+  ]
+  if capo = nobody [ stop ]
+
+  let vx 0
+  let vy 0
+
+  let dxl ([xcor] of capo) - xcor
+  let dyl ([ycor] of capo) - ycor
+  let dl  distance capo
+  if dl > 0 [
+    let delta dl - target-d
+    if abs delta > toll [
+      set vx vx + (dxl / dl) * delta
+      set vy vy + (dyl / dl) * delta
+    ]
+  ]
+
+  ;; ---------------- repulsione/attrazione da ogni compagno -----------------
+  let mates sort mooses with [
+        group-id = [group-id] of myself
+    and self      != myself
+  ]
+
+  foreach mates [ m ->
+    let dxi ([xcor] of m) - xcor      ;; nomi diversi!
+    let dyi ([ycor] of m) - ycor
+    let di  distance m
+    if di > 0 [
+      let deltai di - target-d
+      if abs deltai > toll [
+        set vx vx + (dxi / di) * deltai
+        set vy vy + (dyi / di) * deltai
+      ]
+    ]
+  ]
+
+  ;; ---------------- applica movimento --------------------------------------
+  if vx != 0 or vy != 0 [
+    let len sqrt (vx * vx + vy * vy)
+    set vx (vx / len) * step
+    set vy (vy / len) * step
+    setxy (xcor + vx) (ycor + vy)
+  ]
+end
+
+
+
+
+
+
+
 
 
 ;; ---------------------------------------------------------------------------
@@ -475,7 +599,7 @@ to go-bears
     ]
     ;; tocca fuoco vivo → stato 3 (bruciato)
     if any? (burning-trees in-radius 0.4) or any? (fires in-radius 0.4) [
-      set stato 3
+      set stato 4
     ]
 
     ;; contatore calore
@@ -486,7 +610,7 @@ to go-bears
       set ticks-near-hot max list 0 (ticks-near-hot - 1)
     ]
     if ticks-near-hot >= 150 [
-      set stato 3    ;; morte per calore prolungato
+      set stato 4    ;; morte per calore prolungato
     ]
 
     ;; stato 0 – relax
@@ -495,7 +619,7 @@ to go-bears
       rt random-int-between -15 15
       fd 0.006
       if any? (burning-trees in-radius 20) or any? (fires in-radius 20)
-         or any? (warm-trees in-radius 4) [
+      or any? (warm-trees in-radius 4) [
         set stato 1
       ]
     ]
@@ -504,15 +628,15 @@ to go-bears
     if stato = 1 [
       set color orange
       escape-bears
-      fd 0.01
+      fd 0.012
       if any? (burning-trees in-radius 4) or any? (fires in-radius 4)
-         or any? (warm-trees in-radius 2) [
+      or any? (warm-trees in-radius 2) [
         set stato 2
       ]
       if not any? (burning-trees in-radius 24)
-         and not any? (fires in-radius 24)
-         and not any? (warm-trees in-radius 10)
-         and ticks-near-hot < safe-hot-threshold [
+      and not any? (fires in-radius 24)
+      and not any? (warm-trees in-radius 10)
+      and ticks-near-hot < safe-hot-threshold [
         set stato 0
       ]
     ]
@@ -521,15 +645,15 @@ to go-bears
     if stato = 2 [
       set color red
       escape-bears
-      fd 0.03
+      fd 0.04
       if any? (burning-trees in-radius 2) or any? (fires in-radius 2)
-         or any? (warm-trees in-radius 1) [
+      or any? (warm-trees in-radius 1) [
         set stato 3
       ]
       if not any? (burning-trees in-radius 7)
-         and not any? (fires in-radius 7)
-         and not any? (warm-trees in-radius 3)
-         and ticks-near-hot < safe-hot-threshold [
+      and not any? (fires in-radius 7)
+      and not any? (warm-trees in-radius 3)
+      and ticks-near-hot < safe-hot-threshold [
         set stato 1
       ]
     ]
@@ -538,14 +662,14 @@ to go-bears
     if stato = 3 [
       set color violet
       escape-bears
-      fd 0.066
+      fd 0.075
       if any? (burning-trees in-radius 0.4) or any? (fires in-radius 0.4) [
         set stato 4
       ]
       if not any? (burning-trees in-radius 4)
-         and not any? (fires in-radius 4)
-         and not any? (warm-trees in-radius 2)
-         and ticks-near-hot < safe-hot-threshold [
+      and not any? (fires in-radius 4)
+      and not any? (warm-trees in-radius 2)
+      and ticks-near-hot < safe-hot-threshold [
         set stato 2
       ]
     ]
@@ -573,7 +697,10 @@ end
 ;; 14) LOGICA CERVI – 5 STATI
 ;; ---------------------------------------------------------------------------
 to go-mooses
+  update-moose-leaders
   ask mooses [
+    if is-leader? = true [
+      set color red ]
 
     ;; bordi
     if abs pxcor >= 20 or abs pycor >= 20 [
@@ -599,7 +726,7 @@ to go-mooses
       rt random-int-between -15 15
       fd 0.005
       if any? (burning-trees in-radius 10) or any? (fires in-radius 10)
-         or any? (warm-trees in-radius 3) [
+      or any? (warm-trees in-radius 3) [
         set stato 1
       ]
     ]
@@ -614,16 +741,16 @@ to go-mooses
 
 
       if any? (burning-trees in-radius 5) or any? (fires in-radius 5)
-         or any? (warm-trees in-radius 1) [
+      or any? (warm-trees in-radius 1) [
         set stato 2
       ]
       if not any? (burning-trees with [is-burning] in-radius 15)
-         and not any? (fires in-radius 15)
-         and not any? (warm-trees in-radius 7)
-         and ticks-near-hot < safe-hot-threshold [
+      and not any? (fires in-radius 15)
+      and not any? (warm-trees in-radius 7)
+      and ticks-near-hot < safe-hot-threshold [
         set stato 0
       ]
-      escape-mooses
+      update-moose-not-leader 0.005
     ]
 
     ;; stato 2 – fuga
@@ -632,50 +759,54 @@ to go-mooses
       set distanza-coesione 6
       fd 0.05
       if any? (burning-trees in-radius 2) or any? (fires in-radius 2)
-         or any? (warm-trees in-radius 0.5) [
+      or any? (warm-trees in-radius 0.5) [
         set stato 3
       ]
       if not any? (burning-trees in-radius 9)
-         and not any? (fires in-radius 9)
-         and not any? (warm-trees in-radius 4)
-         and ticks-near-hot < safe-hot-threshold [
+      and not any? (fires in-radius 9)
+      and not any? (warm-trees in-radius 4)
+      and ticks-near-hot < safe-hot-threshold [
         set stato 1
       ]
       escape-mooses
-    ]
-
-    ;; stato 3 – panico
-    if stato = 3 [
-      set color blue
-      set distanza-coesione 7
-      fd 0.1
-      if any? (burning-trees in-radius 0.4) or any? (fires in-radius 0.4) [
-        set stato 4
-      ]
-      if not any? (burning-trees in-radius 6)
-         and not any? (fires in-radius 6)
-         and not any? (warm-trees in-radius 3)
-         and ticks-near-hot < safe-hot-threshold [
-        set stato 2
-      ]
-      escape-mooses
-    ]
-
-    ;; stato 4 – morto
-    if stato = 4 [
-      set heading 0
-      set color white
-      set size 1.5
-      set shape "tombstone"
-      stop
-    ]
-
-    ;; lampeggio giallo caldo
-    let base-color color
-    if near-hot? and stato < 4 [
-      ifelse ticks mod 8 < 4 [ set color yellow ] [ set color base-color ]
-    ]
+      update-moose-not-leader 0.05
   ]
+
+  ;; stato 3 – panico
+  if stato = 3 [
+    set color blue
+    set distanza-coesione 7
+    fd 0.1
+    if any? (burning-trees in-radius 0.4) or any? (fires in-radius 0.4) [
+      set stato 4
+    ]
+    if not any? (burning-trees in-radius 6)
+    and not any? (fires in-radius 6)
+    and not any? (warm-trees in-radius 3)
+    and ticks-near-hot < safe-hot-threshold [
+      set stato 2
+    ]
+    escape-mooses
+    update-moose-not-leader 0.1
+  ]
+
+  ;; stato 4 – morto
+  if stato = 4 [
+    set heading 0
+    set color white
+    set size 1.5
+    set shape "tombstone"
+    stop
+  ]
+if is-leader? [ set color color - 2 ]
+
+  ;; lampeggio giallo caldo
+  let base-color color
+  if near-hot? and stato < 4 [
+    ifelse ticks mod 8 < 4 [ set color yellow ] [ set color base-color ]
+  ]
+]
+sync-moose-group-states
 end
 
 
@@ -717,7 +848,7 @@ to-report centro-branco [gid]
   [
     ;; baricentro reale del branco
     report (list mean [xcor] of membri
-                 mean [ycor] of membri)
+      mean [ycor] of membri)
   ]
   [
     ;; nessun membro vivo (tutti morti o usciti):
@@ -730,7 +861,7 @@ end
 ;; Reporter: orsi-morti  –  quante bear-turtles sono morte
 ;; ----------------------------------------------------------
 to-report orsi-morti
-  report count bears with [ stato = 3 ]
+  report count bears with [ stato = 4 ]
 end
 
 ;; ----------------------------------------------------------
@@ -917,7 +1048,7 @@ forest-seed
 forest-seed
 0
 500
-156.0
+376.0
 1
 1
 NIL
@@ -947,11 +1078,33 @@ num-mooses
 num-mooses
 0
 150
-112.0
+55.0
 1
 1
 NIL
 HORIZONTAL
+
+MONITOR
+791
+49
+857
+94
+Orsi Morti
+orsi-morti
+17
+1
+11
+
+MONITOR
+791
+105
+864
+150
+Cervi Morti
+cervi-morti
+17
+1
+11
 
 @#$#@#$#@
 ## WHAT IS IT?
