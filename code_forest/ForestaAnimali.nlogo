@@ -12,7 +12,14 @@ globals [
   separazione-g          ;; peso della repulsione minima fra compagni
   min-dist-bear    ;; distanza minima in patch (es. 2)
   sep-bear-g       ;; intensità della spinta di separazione
+  burnt-patches        ;; numero di patch nello stato ASH
+  percent-burned       ;; superficie bruciata in %
+  live-bears           ;; orsi vivi al tick corrente
+  live-deers           ;; cervi/alci vivi al tick corrente
+  survivors-bears     ;; orsi sopravvissuti / in salvo
+  survivors-deers     ;; cervi sopravvissuti / in salvo
 ]
+
 
 patches-own [
   altitude                     ;; quota (per propagazione fuoco in salita)
@@ -158,7 +165,11 @@ to create-forest
       ]
     ]
   ]
-
+  set burnt-patches  0
+  set percent-burned 0
+  set live-bears     count bears      ;; usa il nome del tuo breed!
+  set live-deers     count mooses     ;; o 'deers' se lo hai chiamato così
+  clear-all-plots                     ;; azzera i grafici
   reset-ticks
 end
 
@@ -272,7 +283,8 @@ to go
   ;; animali
   go-bears
   go-mooses
-
+  update-metrics
+  draw-sim-plots
   tick
 end
 
@@ -914,6 +926,40 @@ end
 to-report cervi-rimanenti
   report count mooses with [ stato < 4]
 end
+;; ---------------------------------------------------------------------------
+;; AGGIORNA CONTATORI GLOBALI  (alberi bruciati + fauna viva / in salvo)
+;; ---------------------------------------------------------------------------
+to update-metrics
+  ;; --- superficie bruciata -------------------------------------------------
+  set burnt-patches  count trees with [ is-burnt ]
+  let tot-trees      max list 1 (count trees)     ;; evita /0
+  set percent-burned 100 * burnt-patches / tot-trees
+
+  ;; --- fauna ancora nel mondo (stato < 4) ----------------------------------
+  set live-bears  count bears  with [ stato < 4 ]
+  set live-deers  count mooses with [ stato < 4 ]
+
+  ;; --- fauna sopravvissuta (= viva o già uscita con stato 99) --------------
+  set survivors-bears  count bears  with [ stato < 4 or stato > 90 ]
+  set survivors-deers  count mooses with [ stato < 4 or stato > 90 ]
+end
+
+to draw-sim-plots
+  ;; ---------- grafico: area bruciata ----------
+  set-current-plot "Area Bruciata vs Tempo"
+  set-current-plot-pen "area"
+  plot percent-burned
+
+  ;; ---------- grafico: fauna (sopravvissuti) ----------
+  set-current-plot "Fauna vs Tempo"
+
+  set-current-plot-pen "orsi"
+  plot survivors-bears
+
+  set-current-plot-pen "cervi"
+  plot survivors-deers
+end
+
 @#$#@#$#@
 GRAPHICS-WINDOW
 210
@@ -1129,10 +1175,10 @@ NIL
 HORIZONTAL
 
 MONITOR
-791
-49
-857
-94
+789
+15
+855
+60
 Orsi Morti
 orsi-morti
 17
@@ -1151,10 +1197,10 @@ cervi-morti
 11
 
 MONITOR
-878
-47
-990
-92
+879
+14
+1001
+59
 Orsi Sopravvissuti
 orsi-sopravvissuti
 17
@@ -1174,9 +1220,9 @@ cervi-sopravvissuti
 
 MONITOR
 1014
-48
+16
 1108
-93
+61
 Orsi Rimanenti
 orsi-rimanenti
 17
@@ -1193,6 +1239,54 @@ cervi-rimanenti
 17
 1
 11
+
+MONITOR
+878
+62
+1000
+107
+Superficie bruciata (%)
+percent-burned
+1
+1
+11
+
+PLOT
+789
+170
+1106
+356
+Area Bruciata vs Tempo
+NIL
+NIL
+0.0
+1000.0
+0.0
+100.0
+true
+false
+"" ""
+PENS
+"area" 1.0 0 -16777216 true "" ""
+
+PLOT
+789
+365
+1106
+544
+Fauna vs Tempo
+NIL
+NIL
+0.0
+1000.0
+0.0
+150.0
+true
+false
+"" ""
+PENS
+"orsi" 1.0 0 -10402772 true "" ""
+"cervi" 1.0 0 -3889007 true "" ""
 
 @#$#@#$#@
 ## WHAT IS IT?
