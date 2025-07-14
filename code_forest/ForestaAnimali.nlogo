@@ -10,6 +10,8 @@ globals [
   coesione-g
   distanza-coesione
   separazione-g          ;; peso della repulsione minima fra compagni
+  min-dist-bear    ;; distanza minima in patch (es. 2)
+  sep-bear-g       ;; intensità della spinta di separazione
 ]
 
 patches-own [
@@ -74,6 +76,8 @@ to create-forest
   set coesione-g  0.012     ;;
   set distanza-coesione 4   ;; se > 5 patch dal centro, inizia a tirare
   set separazione-g 0.02        ;; taralo 0.01-0.03 a tuo gusto
+  set min-dist-bear 2        ;; prova 1.8 – 2.5
+  set sep-bear-g    0.03     ;; prova 0.025 – 0.05
 
 
   ;; ----------------------------------------------------------
@@ -107,7 +111,7 @@ to create-forest
   let gruppi []
   let remaining num-mooses
   while [ remaining > 0 ] [
-    let g 2 + random 3              ;; 2,3,4
+    let g 3 + random 2             ;; 2,3,4
     if remaining - g = 1 [ set g g + 1 ]  ;; evita resto 1
     if g > remaining [ set g remaining ]
     set gruppi lput g gruppi
@@ -143,7 +147,7 @@ to create-forest
         ;; crea un cervo bianco sulla sede trovata
         ask sede [
           sprout-mooses 1 [
-            set color white
+            set color gid
             set group-id gid
             set stato 0
             set ticks-near-hot 0
@@ -398,38 +402,67 @@ to-report burning-and-warm-trees
 end
 
 
-;; ---------------------------------------------------------------------------
-;; 12) FUNZIONE DI FUGA (animali) – vettore somma dei repulsori
-;; ---------------------------------------------------------------------------
+;; ----------------------------------------------------------
+;; escape-bears
+;;   • repulsione da alberi caldi (come prima)
+;;   • + repulsione fra orsi entro min-dist-bear
+;;   → restituisce vxf | vyf aggiornati e orienta l’orso
+;; ----------------------------------------------------------
 to escape-bears
+  ;; ---------- 1. repulsione dal fuoco ----------------------
   let vxf 0
   let vyf 0
   ask burning-and-warm-trees in-radius 10 [
-    let dx3 ([xcor] of myself) - xcor
-    let dy3 ([ycor] of myself) - ycor
-    let d  distance myself
+    let dxi ([xcor] of myself) - xcor
+    let dyi ([ycor] of myself) - ycor
+    let d distance myself
     if d > 0 [
-      set vxf vxf + dx3 / (d * d)
-      set vyf vyf + dy3 / (d * d)
+      set vxf vxf + dxi / (d * d)
+      set vyf vyf + dyi / (d * d)
     ]
   ]
+
+  ;; ---------- 2. repulsione minima fra orsi ----------------
+  let vsx 0
+  let vsy 0
+ ask other (turtle-set bears mooses) in-radius min-dist-bear [
+    ;; verso che punta DAL vicino VERSO di me
+    let dx-b ([xcor] of myself) - xcor
+    let dy-b ([ycor] of myself) - ycor
+    let d-b  distance myself
+    if d-b < 0.08 [ set d-b 0.08 ]          ;; evita /0 quando sono sovrapposti
+    set vsx vsx + sep-bear-g * dx-b / (d-b * d-b)
+    set vsy vsy + sep-bear-g * dy-b / (d-b * d-b)
+  ]
+  set vxf vxf + vsx
+  set vyf vyf + vsy
+
+
+  ;; ---------- 3. orienta verso direzione risultante --------
   if vxf != 0 or vyf != 0 [
     facexy (xcor + vxf) (ycor + vyf)
   ]
 end
 
+
 to escape-mooses
+  ;; ---------- 1. repulsione dal fuoco ----------------------
   let vxf 0
   let vyf 0
   ask burning-and-warm-trees in-radius 10 [
     let dx3 ([xcor] of myself) - xcor
     let dy3 ([ycor] of myself) - ycor
-    let d  distance myself
+    let d   distance myself
     if d > 0 [
-      set vxf vxf + dx3 / (d * d)
-      set vyf vyf + dy3 / (d * d)
+      ;; peso più alto se d è piccolissima (< 2 patch)
+      ;;   d = 0.0-2.0  → peso  = 5-1
+      ;;   d ≥ 2.0      → peso  = 1 (comportamento attuale)
+      let peso 1 + 4 * (1 - min list (d / 2) 1)
+      set vxf vxf + peso * dx3 / (d * d)
+      set vyf vyf + peso * dy3 / (d * d)
     ]
   ]
+
   ;; coesione verso il baricentro del branco
   let centro centro-branco group-id
   let dist-centro distancexy (item 0 centro) (item 1 centro)
@@ -551,7 +584,7 @@ to update-moose-not-leader [step]
 
   ;; ---------------- repulsione/attrazione da ogni compagno -----------------
   let mates sort mooses with [
-        group-id = [group-id] of myself
+    group-id = [group-id] of myself
     and self      != myself
   ]
 
@@ -676,7 +709,7 @@ to go-bears
 
     ;; lampeggio giallo se vicino al caldo
     let base-color color
-    if near-hot? and stato < 3 [
+    if near-hot? and stato < 4 [
       ifelse ticks mod 8 < 4 [ set color yellow ] [ set color base-color ]
     ]
 
@@ -770,43 +803,43 @@ to go-mooses
       ]
       escape-mooses
       update-moose-not-leader 0.05
-  ]
-
-  ;; stato 3 – panico
-  if stato = 3 [
-    set color blue
-    set distanza-coesione 7
-    fd 0.1
-    if any? (burning-trees in-radius 0.4) or any? (fires in-radius 0.4) [
-      set stato 4
     ]
-    if not any? (burning-trees in-radius 6)
-    and not any? (fires in-radius 6)
-    and not any? (warm-trees in-radius 3)
-    and ticks-near-hot < safe-hot-threshold [
-      set stato 2
+
+    ;; stato 3 – panico
+    if stato = 3 [
+      set color blue
+      set distanza-coesione 7
+      fd 0.1
+      if any? (burning-trees in-radius 0.4) or any? (fires in-radius 0.4) [
+        set stato 4
+      ]
+      if not any? (burning-trees in-radius 6)
+      and not any? (fires in-radius 6)
+      and not any? (warm-trees in-radius 3)
+      and ticks-near-hot < safe-hot-threshold [
+        set stato 2
+      ]
+      escape-mooses
+      update-moose-not-leader 0.1
     ]
-    escape-mooses
-    update-moose-not-leader 0.1
-  ]
 
-  ;; stato 4 – morto
-  if stato = 4 [
-    set heading 0
-    set color white
-    set size 1.5
-    set shape "tombstone"
-    stop
-  ]
-if is-leader? [ set color color - 2 ]
+    ;; stato 4 – morto
+    if stato = 4 [
+      set heading 0
+      set color white
+      set size 1.5
+      set shape "tombstone"
+      stop
+    ]
+    if is-leader? [ set color color - 2 ]
 
-  ;; lampeggio giallo caldo
-  let base-color color
-  if near-hot? and stato < 4 [
-    ifelse ticks mod 8 < 4 [ set color yellow ] [ set color base-color ]
+    ;; lampeggio giallo caldo
+    let base-color color
+    if near-hot? and stato < 4 [
+      ifelse ticks mod 8 < 4 [ set color yellow ] [ set color base-color ]
+    ]
   ]
-]
-sync-moose-group-states
+  sync-moose-group-states
 end
 
 
@@ -863,12 +896,23 @@ end
 to-report orsi-morti
   report count bears with [ stato = 4 ]
 end
-
+to-report orsi-sopravvissuti
+  report count bears with [ stato < 4 or stato > 90 ]
+end
+to-report orsi-rimanenti
+  report count bears with [ stato < 4]
+end
 ;; ----------------------------------------------------------
 ;; Reporter: cervi-morti – quante moose-turtles sono morte
 ;; ----------------------------------------------------------
 to-report cervi-morti
   report count mooses with [ stato = 4 ]
+end
+to-report cervi-sopravvissuti
+  report count mooses with [ stato < 4 or stato > 90 ]
+end
+to-report cervi-rimanenti
+  report count mooses with [ stato < 4]
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -971,7 +1015,7 @@ east-wind-speed
 east-wind-speed
 -25
 25
--25.0
+-19.0
 1
 1
 p/t
@@ -986,7 +1030,7 @@ north-wind-speed
 north-wind-speed
 -25
 25
--25.0
+7.0
 1
 1
 p/t
@@ -1048,7 +1092,7 @@ forest-seed
 forest-seed
 0
 500
-376.0
+303.0
 1
 1
 NIL
@@ -1063,7 +1107,7 @@ num-bears
 num-bears
 0
 50
-34.0
+37.0
 1
 1
 NIL
@@ -1078,7 +1122,7 @@ num-mooses
 num-mooses
 0
 150
-55.0
+84.0
 1
 1
 NIL
@@ -1097,11 +1141,55 @@ orsi-morti
 
 MONITOR
 791
-105
+115
 864
-150
+160
 Cervi Morti
 cervi-morti
+17
+1
+11
+
+MONITOR
+878
+47
+990
+92
+Orsi Sopravvissuti
+orsi-sopravvissuti
+17
+1
+11
+
+MONITOR
+879
+115
+999
+160
+Cervi Sopravvissuti
+cervi-sopravvissuti
+17
+1
+11
+
+MONITOR
+1014
+48
+1108
+93
+Orsi Rimanenti
+orsi-rimanenti
+17
+1
+11
+
+MONITOR
+1013
+116
+1114
+161
+Cervi Rimanenti
+cervi-rimanenti
 17
 1
 11
@@ -1441,15 +1529,14 @@ Circle -7500403 true true 120 120 60
 tombstone
 true
 0
-Rectangle -7500403 true true 45 225 255 240
-Rectangle -7500403 true true 60 210 240 225
-Polygon -7500403 true true 75 210 75 210 75 90 105 60 195 60 225 90 225 210 75 210
-Rectangle -16777216 true false 375 105 405 210
+Rectangle -7500403 true true 120 75 180 90
+Rectangle -7500403 true true 75 90 225 210
+Polygon -7500403 true true 75 90 105 60 195 60 225 90
+Rectangle -7500403 true true 150 120 150 120
 Rectangle -16777216 true false 105 105 195 135
 Rectangle -16777216 true false 135 75 165 195
-Rectangle -14835848 true false -15 255 0 270
-Rectangle -13840069 true false -90 240 -45 270
-Rectangle -10899396 true false -30 240 0 270
+Rectangle -7500403 true true 60 210 240 225
+Rectangle -7500403 true true 45 225 255 240
 
 tree
 false
