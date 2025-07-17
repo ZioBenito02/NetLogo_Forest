@@ -306,16 +306,7 @@ end
 ;; ---------------------------------------------------------------------------
 ;; 6) ACCENSIONE INIZIALE – accende un albero random
 ;; ---------------------------------------------------------------------------
-to start-fire
-  let fire-started false
-  while [not fire-started] [
-    ask n-of 1 patches [ ignite ]
-    if count fires > 0 [ set fire-started true ]
-  ]
-  set fires-started fires-started + 1
-  random-seed newFireSeed         ;; reset RNG per eventi successivi
-  set newFireSeed newFireSeed +20
-end
+
 
 
 ;; ---------------------------------------------------------------------------
@@ -1023,6 +1014,8 @@ to save-run-summary
   let aliveB orsi-sopravvissuti
   let aliveD cervi-sopravvissuti
   let firesN  fires-started
+  let percBurn percent-burned
+  let tickk ticks
   let seedVal forest-seed        ;; o new-seed, se preferisci
 
   ;; --- apri / crea file -------------------------------
@@ -1032,12 +1025,12 @@ to save-run-summary
   if header? [
     file-print (csv:to-row (list "east_wind" "north_wind" "inclination"
                                  "forest_density" "bear_deaths" "deer_deaths"
-                                 "bear_outliers" "deer_outliers"  "bears_alive" "deers_alive" "fires_started" "seed"))
+                                 "bear_outliers" "deer_outliers"  "bears_alive" "deers_alive" "fires_started" "percent-burned" "ticks" "seed"))
   ]
 
   ;; --- scrivi la riga dati ----------------------------
   file-print (csv:to-row (list east-w north-w incl dens
-                               deadB deadD outB aliveB aliveD outD firesN seedVal))
+                               deadB deadD outB aliveB aliveD outD firesN percBurn tickk seedVal))
   file-close
 end
 @#$#@#$#@
@@ -1141,7 +1134,7 @@ east-wind-speed
 east-wind-speed
 -25
 25
-25.0
+-25.0
 1
 1
 p/t
