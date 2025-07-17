@@ -1052,7 +1052,7 @@ to save-run-summary
   if header? [
     file-print (csv:to-row (list "east_wind" "north_wind" "inclination"
                                  "forest_density" "bear_deaths" "deer_deaths"
-                                 "bear_outliers" "deer_outliers"  "bears_alive" "deers_alive" "fires_started" "percent-burned" "ticks" "seed"))
+                                 "bear_outliers"   "bears_alive" "deers_alive" "fires_started" "percent-burned" "ticks" "seed"))
   ]
 
   ;; --- scrivi la riga dati ----------------------------
@@ -1161,7 +1161,7 @@ east-wind-speed
 east-wind-speed
 -25
 25
--25.0
+25.0
 1
 1
 p/t
@@ -1238,7 +1238,7 @@ forest-seed
 forest-seed
 0
 500
-1.0
+2.0
 1
 1
 NIL
