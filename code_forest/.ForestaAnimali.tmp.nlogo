@@ -45,7 +45,7 @@ breed [ sparks  spark ]
 breed [ trees   tree ]
 breed [ fires   fire ]
 breed [ bears   bear ]
-breed [ mooses  moose ]
+breed [ deers  deer ]
 
 bears-own [stato ticks-near-hot death-tick]   ;; 0 relax | 1 fuga | 2 fuga veloce | 3 panico | 4 morto
                                    ;; caratteristiche degli orsi:
@@ -55,7 +55,7 @@ bears-own [stato ticks-near-hot death-tick]   ;; 0 relax | 1 fuga | 2 fuga veloc
                                    ;;   2 - escape-veloce: scappa da incendio più velocemente
                                    ;;   3 - fire/panico  : corre in preda al panico
                                    ;;   4 - dead         : tomba
-mooses-own [stato ticks-near-hot group-id is-leader? death-tick]  ;; 0 relax | 1 alert | 2 escape | 3 panico | 4 morto
+deers-own [stato ticks-near-hot group-id is-leader? death-tick]  ;; 0 relax | 1 alert | 2 escape | 3 panico | 4 morto
                                                        ;; caratteristiche dei cervi (analoghe sopra, con stato 1 di “alert” intermedio)
 
 
@@ -84,7 +84,7 @@ to create-forest
   set spark-frequency 300
   set next-group-id 0
   set-default-shape bears  "bear"
-  set-default-shape mooses "moose"
+  set-default-shape deers "deer"
   set safe-hot-threshold 20
   set near-hot-threshold 50
   set coesione-g  0.012     ;;
@@ -129,7 +129,7 @@ to create-forest
   ;; 3. calcola taglie casuali (2-4) per i branchi di cervi
   ;; ----------------------------------------------------------
   let gruppi []
-  let remaining num-mooses
+  let remaining num-deers
   while [ remaining > 0 ] [
     let g 3 + random 2             ;; 2,3,4
     if remaining - g = 1 [ set g g + 1 ]  ;; evita resto 1
@@ -166,7 +166,7 @@ to create-forest
 
         ;; crea un cervo bianco sulla sede trovata
         ask sede [
-          sprout-mooses 1 [
+          sprout-deers 1 [
             set color white
             set group-id gid
             set stato 0
@@ -182,7 +182,7 @@ to create-forest
   set burnt-patches  0
   set percent-burned 0
   set live-bears     count bears      ;; usa il nome del tuo breed!
-  set live-deers     count mooses     ;; o 'deers' se lo hai chiamato così
+  set live-deers     count deers     ;; o 'deers' se lo hai chiamato così
   clear-all-plots                     ;; azzera i grafici
   reset-ticks
 end
@@ -296,7 +296,7 @@ to go
 
   ;; animali
   go-bears
-  go-mooses
+  go-deers
   update-metrics
   draw-sim-plots
   tick
@@ -464,7 +464,7 @@ to escape-bears
   ;; ---------- 2. repulsione minima fra orsi ----------------
   let vsx 0
   let vsy 0
- ask other (turtle-set bears mooses) in-radius min-dist-bear [
+ ask other (turtle-set bears deers) in-radius min-dist-bear [
     ;; verso che punta DAL vicino VERSO di me
     let dx-b ([xcor] of myself) - xcor
     let dy-b ([ycor] of myself) - ycor
@@ -485,9 +485,9 @@ end
 
 
 ;; ==========================================================
-;;  escape‑mooses
+;;  escape‑deers
 ;; ==========================================================
-to escape-mooses
+to escape-deers
   ;; ---------- vettori parziali ----------
   let vFx 0   ;; repulsione dal fuoco
   let vFy 0
@@ -520,7 +520,7 @@ to escape-mooses
 
   ;; ---------- C. separazione minima (solo se NON leader) ----------
   if not is-leader? [
-    let vicini mooses with [
+    let vicini deers with [
       group-id = [group-id] of myself
       and self != myself
       and is-leader? = false           ;; ignora il leader
@@ -539,7 +539,7 @@ to escape-mooses
 
   ;; ---------- D. attrazione verso il leader ----------
   if not is-leader? [
-    let leader one-of mooses with [
+    let leader one-of deers with [
       group-id = [group-id] of myself and is-leader?]
     if leader != nobody [
       let dxl ([xcor] of leader) - xcor
@@ -576,14 +576,14 @@ end
 ;; 2. Aggiornamento dei leader di branco
 ;;    (immutato, incluso per completezza)
 ;; ==========================================================
-to update-moose-leaders
+to update-deer-leaders
   let soglia 2                      ;; distanza minima per scalzare il leader
 
-  foreach remove-duplicates [group-id] of mooses [
+  foreach remove-duplicates [group-id] of deers [
     gid ->
 
     ;; membri vivi del branco
-    let membri mooses with [group-id = gid and stato < 4]
+    let membri deers with [group-id = gid and stato < 4]
     if not any? membri [ stop ]
 
     ;; attuale leader (se ancora vivo)
@@ -612,11 +612,11 @@ end
 ;; ----------------------------------------------------------
 ;; Sincronizza gli stati all'interno di ogni branco di cervi
 ;; ----------------------------------------------------------
-to sync-moose-group-states
+to sync-deer-group-states
   ;; per ogni id-branco ancora vivo
-  foreach remove-duplicates [group-id] of mooses [
+  foreach remove-duplicates [group-id] of deers [
     gid ->
-    let vivi mooses with [group-id = gid and stato < 4]   ;; esclude i morti
+    let vivi deers with [group-id = gid and stato < 4]   ;; esclude i morti
     if any? vivi [
       ;; stato più critico (0 relax, 1 alert, 2 escape, 3 panico)
       let max-s max [stato] of vivi
@@ -634,11 +634,11 @@ end
 ;  • il leader NON è più nel ciclo mates (niente doppio conteggio)
 ;  • usa facexy + fd  (movimento “continuo”, niente tele‑salti)
 ; ---------------------------------------------------------------------------
-to update-moose-not-leader [max-step]
+to update-deer-not-leader [max-step]
   if is-leader? [ stop ]
 
   ; ---------- 1. trova il leader del mio branco ----------
-  let leader one-of mooses with [
+  let leader one-of deers with [
     group-id = [group-id] of myself
     and is-leader?
     and stato < 4                                   ;; ancora vivo
@@ -663,7 +663,7 @@ to update-moose-not-leader [max-step]
   ]
 
   ; ---------- 3. separazione dagli altri compagni ----------
-  let vicini mooses with [
+  let vicini deers with [
     group-id = [group-id] of myself
     and not is-leader?
     and self != myself ]
@@ -800,9 +800,9 @@ end
 ;; ---------------------------------------------------------------------------
 ;; 14) LOGICA CERVI – 5 STATI
 ;; ---------------------------------------------------------------------------
-to go-mooses
+to go-deers
 
-  ask mooses [
+  ask deers [
 
 
     ;; bordi
@@ -852,7 +852,7 @@ to go-mooses
       and ticks-near-hot < safe-hot-threshold [
         set stato 0
       ]
-      ifelse is-leader? [ fd 0.005 ] [ update-moose-not-leader 0.005 ]   ;; stato 1
+      ifelse is-leader? [ fd 0.005 ] [ update-deer-not-leader 0.005 ]   ;; stato 1
     ]
 
     ;; stato 2 – fuga
@@ -868,8 +868,8 @@ to go-mooses
       and ticks-near-hot < safe-hot-threshold [
         set stato 1
       ]
-      escape-mooses
-      ifelse is-leader? [ fd 0.05 ] [ update-moose-not-leader 0.05 ]   ;; stato 1
+      escape-deers
+      ifelse is-leader? [ fd 0.05 ] [ update-deer-not-leader 0.05 ]   ;; stato 1
     ]
 
     ;; stato 3 – panico
@@ -884,8 +884,8 @@ to go-mooses
       and ticks-near-hot < safe-hot-threshold [
         set stato 2
       ]
-      escape-mooses
-      ifelse is-leader? [ fd 0.1 ] [ update-moose-not-leader 0.1 ]   ;; stato 1
+      escape-deers
+      ifelse is-leader? [ fd 0.1 ] [ update-deer-not-leader 0.1 ]   ;; stato 1
     ]
 
     ;; stato 4 – morto
@@ -906,8 +906,8 @@ to go-mooses
       ifelse ticks mod 8 < 4 [ set color yellow ] [ set color group-id ]
     ]
   ]
-  update-moose-leaders
-  sync-moose-group-states
+  update-deer-leaders
+  sync-deer-group-states
 end
 
 
@@ -943,7 +943,7 @@ end
 ;; restituisce la posizione media dei cervi vivi del branco ‹gid›
 ;; ----------------------------------------------------------
 to-report centro-branco [gid]
-  let membri mooses with [group-id = gid and stato < 4]
+  let membri deers with [group-id = gid and stato < 4]
 
   ifelse any? membri
   [
@@ -971,16 +971,16 @@ to-report orsi-rimanenti
   report count bears with [ stato < 4]
 end
 ;; ----------------------------------------------------------
-;; Reporter: cervi-morti – quante moose-turtles sono morte
+;; Reporter: cervi-morti – quante deer-turtles sono morte
 ;; ----------------------------------------------------------
 to-report cervi-morti
-  report count mooses with [ stato = 4 ]
+  report count deers with [ stato = 4 ]
 end
 to-report cervi-sopravvissuti
-  report count mooses with [ stato < 4 or stato > 90 ]
+  report count deers with [ stato < 4 or stato > 90 ]
 end
 to-report cervi-rimanenti
-  report count mooses with [ stato < 4]
+  report count deers with [ stato < 4]
 end
 ;; Quanti orsi sono morti entro il tick 10?
 to-report early-bear-deaths
@@ -988,8 +988,8 @@ to-report early-bear-deaths
 end
 
 ;; Quanti cervi sono morti entro il tick 10?
-to-report early-moose-deaths
-  report count mooses with [ death-tick >= 0 and death-tick < 70]
+to-report early-deer-deaths
+  report count deers with [ death-tick >= 0 and death-tick < 70]
 end
 ;; ---------------------------------------------------------------------------
 ;; AGGIORNA CONTATORI GLOBALI  (alberi bruciati + fauna viva / in salvo)
@@ -1002,11 +1002,11 @@ to update-metrics
 
   ;; --- fauna ancora nel mondo (stato < 4) ----------------------------------
   set live-bears  count bears  with [ stato < 4 ]
-  set live-deers  count mooses with [ stato < 4 ]
+  set live-deers  count deers with [ stato < 4 ]
 
   ;; --- fauna sopravvissuta (= viva o già uscita con stato 99) --------------
   set survivors-bears  count bears  with [ stato < 4 or stato > 90 ]
-  set survivors-deers  count mooses with [ stato < 4 or stato > 90 ]
+  set survivors-deers  count deers with [ stato < 4 or stato > 90 ]
 end
 
 to draw-sim-plots
@@ -1037,7 +1037,7 @@ to save-run-summary
   let deadB   orsi-morti
   let deadD   cervi-morti
   let outB    early-bear-deaths
-  let outD    early-moose-deaths
+  let outD    early-deer-deaths
   let aliveB orsi-sopravvissuti
   let aliveD cervi-sopravvissuti
   let firesN  fires-started
@@ -1052,7 +1052,7 @@ to save-run-summary
   if header? [
     file-print (csv:to-row (list "east_wind" "north_wind" "inclination"
                                  "forest_density" "bear_deaths" "deer_deaths"
-                                 "bear_outliers"   "bears_alive" "deers_alive" "fires_started" "percent-burned" "ticks" "seed"))
+                                 "bear_outliers"  "bears_alive" "deers_alive" "deer_outliers" "fires_started" "percent-burned" "ticks" "seed"))
   ]
 
   ;; --- scrivi la riga dati ----------------------------
@@ -1176,7 +1176,7 @@ north-wind-speed
 north-wind-speed
 -25
 25
--25.0
+25.0
 1
 1
 p/t
@@ -1238,7 +1238,7 @@ forest-seed
 forest-seed
 0
 500
-2.0
+40.0
 1
 1
 NIL
@@ -1264,8 +1264,8 @@ SLIDER
 507
 189
 540
-num-mooses
-num-mooses
+num-deers
+num-deers
 0
 200
 120.0
