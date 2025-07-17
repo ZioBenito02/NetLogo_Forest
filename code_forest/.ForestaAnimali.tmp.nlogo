@@ -314,7 +314,7 @@ to start-fire
   ]
   set fires-started fires-started + 1
   random-seed newFireSeed         ;; reset RNG per eventi successivi
-  set newFireSeed newFireSeed + 20
+  set newFireSeed newFireSeed +20
 end
 
 

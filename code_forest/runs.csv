@@ -1,6 +1,2 @@
-east_wind,north_wind,inclination,forest_density,bear_deaths,deer_deaths,bear_outliers,deer_outliers,bears_alive,deers_alive,seed
-25,25,10,100,0,0,0,40,120,0,1
--25,25,10,100,0,0,0,40,120,0,1
-25,-25,10,100,0,0,0,40,120,0,1
--25,-25,10,100,0,0,0,40,120,0,1
-0,0,10,100,0,0,0,40,120,0,1
+east_wind,north_wind,inclination,forest_density,bear_deaths,deer_deaths,bear_outliers,deer_outliers,bears_alive,deers_alive,fires_started,seed
+25,25,10,100,0,0,0,40,120,0,1,1
