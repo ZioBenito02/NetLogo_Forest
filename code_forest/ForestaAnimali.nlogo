@@ -24,6 +24,7 @@ globals [
   results-file
   fires-started
   newFireSeed
+  outlier-ticks
 ]
 
 
@@ -95,6 +96,7 @@ to create-forest
   set cooled-threshold 200
   set dead-hot-threshold 150
   set fires-started 0
+  set outlier-ticks 70
 
 
 
@@ -984,12 +986,12 @@ to-report cervi-rimanenti
 end
 ;; Quanti orsi sono morti entro il tick 10?
 to-report early-bear-deaths
-  report count bears  with [ death-tick >= 0 and death-tick < 70 ]
+  report count bears  with [ death-tick >= 0 and death-tick < outlier-ticks ]
 end
 
 ;; Quanti cervi sono morti entro il tick 10?
 to-report early-deer-deaths
-  report count deers with [ death-tick >= 0 and death-tick < 70]
+  report count deers with [ death-tick >= 0 and death-tick < outlier-ticks]
 end
 ;; ---------------------------------------------------------------------------
 ;; AGGIORNA CONTATORI GLOBALI  (alberi bruciati + fauna viva / in salvo)
@@ -1354,8 +1356,8 @@ percent-burned
 PLOT
 763
 173
-1080
-359
+1211
+353
 Area Bruciata vs Tempo
 NIL
 NIL
@@ -1371,8 +1373,8 @@ PENS
 
 PLOT
 763
-368
-1080
+362
+1211
 547
 Fauna vs Tempo
 NIL
@@ -1391,7 +1393,7 @@ PENS
 MONITOR
 1097
 19
-1202
+1211
 64
 Outlier Orsi Morti
 early-bear-deaths
