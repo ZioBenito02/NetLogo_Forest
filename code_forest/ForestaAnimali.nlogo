@@ -84,7 +84,7 @@ to create-forest
   set spark-frequency 300
   set next-group-id 0
   set-default-shape bears  "bear"
-  set-default-shape deers "deer"
+  set-default-shape deers "moose"
   set safe-hot-threshold 20
   set near-hot-threshold 50
   set coesione-g  0.012     ;;
